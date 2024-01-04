@@ -64,7 +64,7 @@ static_assert(sizeof(usize) == sizeof(isize));
 #define F64_MIN 2.2250738585072014e-308
 #define F64_MAX 1.7976931348623157e+308
 
-#undef NULL
+#ifndef NULL
 #if defined(__cplusplus)
     #if __cplusplus >= 201103L
         #define NULL nullptr
@@ -73,6 +73,7 @@ static_assert(sizeof(usize) == sizeof(isize));
     #endif
 #else
     #define NULL ((void *)0)
+#endif
 #endif
 
 

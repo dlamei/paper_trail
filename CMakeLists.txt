@@ -8,7 +8,7 @@ project(paper_trail)
 
 
 set(SOURCES
-    src/gb.h
+    src/utils.h
 )
 
 add_executable(paper_trail ${SOURCES} src/main.cpp)

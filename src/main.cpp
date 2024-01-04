@@ -4,7 +4,6 @@
 #include <fstream>
 #include <iostream>
 #include <pthread.h>
-#include <ctype.h>
 
 struct String {
     u8 *data {NULL};
@@ -128,10 +127,26 @@ String parse_ansi_string(Parser *p) {
   return str;
 }
 
-PDF parse_pdf(u8 *content, u64 size) {
-  /* std::string cntnt((char *)content, size); */
-  /* std::cout << cntnt << std::endl; */
+void load_file(const char *path, u8 **buffer, u64 *size) {
+    u64 _size {0};
+    u8 *_buffer {NULL};
 
+    std::ifstream file(path);
+
+    file.seekg(0, std::ios_base::end);
+    _size = file.tellg();
+    _buffer = (u8 *)malloc(_size);
+
+    file.seekg(0);
+    file.read((char *)_buffer, _size);
+
+    GB_ASSERT_MSG(_buffer != NULL, "could not load file '%s'", path);
+
+    *buffer = _buffer;
+    *size = _size;
+}
+
+PDF parse_pdf(u8 *content, u64 size) {
   Parser p = make_parser(content, size);
 
   if (p.curr_byte == '%') {
@@ -161,19 +176,12 @@ PDF parse_pdf(u8 *content, u64 size) {
 
 
 int main() {
+    /* defer(delete content); */
+    u8 *buffer;
+    u64 size;
+    defer(delete buffer);
+    load_file("../dummy.pdf", &buffer, &size);
 
-    u8 *content {NULL};
-    u64 size {0};
-    std::ifstream file("../dummy.pdf");
-
-    file.seekg(0, std::ios_base::end);
-    size = file.tellg();
-    content = (u8 *)malloc(size);
-
-    file.seekg(0);
-    file.read((char *)content, size);
-    defer(delete content);
-
-    PDF pdf = parse_pdf(content, size);
+    PDF pdf = parse_pdf(buffer, size);
 }
 
