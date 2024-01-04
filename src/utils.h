@@ -1,10 +1,10 @@
-#ifndef PAPER_TRAIL_UTILS_H
-#define PAPER_TRAIL_UTILS_H
+#pragma once
 
 #include <cstddef>
 #include <stdint.h>
 #include <cstdarg>
 #include <stdio.h>
+#include <cstdlib>
 
 // taken from [https://github.com/gingerBill/gb]
 
@@ -203,7 +203,7 @@ extern "C++" {
 } while (0)
 #endif
 
-static void gb_assert_handler(char const *prefix, char const *condition, char const *file, i32 line, char const *msg, ...) {
+inline void gb_assert_handler(char const *prefix, char const *condition, char const *file, i32 line, char const *msg, ...) {
 	fprintf(stderr, "%s(%d): %s: ", file, line, prefix);
 	if (condition)
 		fprintf(stderr, "`%s` ", condition);
@@ -216,5 +216,3 @@ static void gb_assert_handler(char const *prefix, char const *condition, char co
 	fprintf(stderr, "\n");
 }
 
-
-#endif
