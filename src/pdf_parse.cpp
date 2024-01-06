@@ -215,7 +215,7 @@ void print_xref_table(const XRefTable &t) {
     } 
 }
 
-XRefTable parse_xref_table(Parser *p) {
+void parse_xref_table(Parser *p) {
     skip_space(p);
     u32 obj_id = (u32)parse_uint(p);
     skip_space(p);
@@ -229,11 +229,13 @@ XRefTable parse_xref_table(Parser *p) {
         *(entries + i) = e;
     }
 
-    return XRefTable {
+    XRefTable xref_table {
         .obj_id = obj_id,
             .obj_count = obj_count,
             .entries = entries,
     };
+
+    p->parsed_pdf.xref_table = xref_table;
 }
 
 void delete_xref_table(XRefTable *t) {
@@ -245,35 +247,52 @@ inline Parser make_parser(u8 *content, u64 size) {
     GB_ASSERT_MSG(size != 0, "empty pdf found");
     GB_ASSERT_MSG(content != NULL, "empty pdf found");
 
-    return Parser{
+    PDF parsed_pdf {
+        .byte_size = size,
+    };
+
+    return Parser {
         .content = content,
             .size = size,
             .curr_byte_indx = 0,
             .curr_byte = content[0],
-            .parsed_pdf{},
+            .parsed_pdf = parsed_pdf,
     };
 }
 
+void parse_header(Parser *p) {
+    String header = parse_comment(p);
+    GB_ASSERT_MSG(next_n_bytes(p, 9), "invalid pdf header");
+    p->parsed_pdf.header = header;
+}
+
+#define COUNT_N_PARSED_BYTES(parse_fn) \
+    u64 __start = p.curr_byte_indx; \
+    parse_fn \
+    p.parsed_pdf.n_bytes_parsed += p.curr_byte_indx - __start;
 
 PDF parse_pdf(u8 *content, u64 size) {
     Parser p = make_parser(content, size);
 
     if (p.curr_byte == '%') {
-        String header = parse_comment(&p);
-        GB_ASSERT_MSG(next_n_bytes(&p, 9), "invalid pdf header");
-
-        p.parsed_pdf.header = header;
+        COUNT_N_PARSED_BYTES (
+            parse_header(&p);
+        )
     }
 
     for (;;) {
         if (p.curr_byte == '%') {
-            parse_comment(&p);
+            COUNT_N_PARSED_BYTES (
+                parse_comment(&p);
+            )
+
         } else if (isalpha(p.curr_byte)) {
             String str = parse_ansi_string(&p);
 
             if (match_string(str, "xref")) {
-                XRefTable table = parse_xref_table(&p);
-                p.parsed_pdf.xref_table = table;
+                COUNT_N_PARSED_BYTES (
+                    parse_xref_table(&p);
+                )
             }
         }
 
@@ -285,6 +304,9 @@ PDF parse_pdf(u8 *content, u64 size) {
 }
 
 void print_parsed_pdf(const PDF &pdf) {
+    printf("byte size: %lu\n", pdf.byte_size);
+    printf("%%-parsed: %f\n", (f64)pdf.n_bytes_parsed / (f64)pdf.byte_size);
+
     printf("%%");
     print_string(pdf.header);
     println();

@@ -17,15 +17,17 @@ struct xref_entry {
 };
 
 struct XRefTable {
-    u32 obj_id;
-    u32 obj_count;
-    xref_entry *entries;
+    u32 obj_id {0};
+    u32 obj_count {0};
+    xref_entry *entries {NULL};
 };
 
 struct PDF {
-    String header {};
+    u64 byte_size {0};
+    u64 n_bytes_parsed {0};
 
-    XRefTable xref_table;
+    String header {};
+    XRefTable xref_table {0};
 };
 
 PDF parse_pdf(u8 *content, u64 size);
