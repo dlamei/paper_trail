@@ -7,5 +7,7 @@ int main() {
 
     load_file("../dummy.pdf", &buffer, &size);
     PDF pdf = parse_pdf(buffer, size);
+
+    print_parsed_pdf(pdf);
 }
 

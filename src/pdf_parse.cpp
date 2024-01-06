@@ -7,6 +7,7 @@
 #include <iostream>
 #include <pthread.h>
 
+// will advance until cond is met or eof is reached
 #define ADVANCE_IF(parser, cond) \
     for (;;) if (!cond || !next_byte(parser)) break
 
@@ -21,24 +22,42 @@ struct Parser {
     PDF parsed_pdf{};
 };
 
-inline bool next_byte(Parser *p) {
-  if (p->curr_byte_indx + 1 < p->size) {
-    p->curr_byte_indx += 1;
-    p->curr_byte = p->content[p->curr_byte_indx];
-    return true;
-  }
+inline bool reached_eof(Parser *p) {
+    return p->curr_byte_indx == p->size;
+}
 
-  return false;
+inline void update_curr_byte(Parser *p) {
+    p->curr_byte = p->content[p->curr_byte_indx];
+}
+
+inline bool next_byte(Parser *p) {
+    if (p->curr_byte_indx + 1 < p->size) {
+        p->curr_byte_indx += 1;
+        update_curr_byte(p);
+        return true;
+    }
+
+    return false;
 }
 
 inline bool next_n_bytes(Parser *p, u64 n) {
-  if (p->curr_byte_indx + n < p->size) {
-    p->curr_byte_indx += n;
-    p->curr_byte = p->content[p->curr_byte_indx];
-    return true;
-  }
+    if (p->curr_byte_indx + n < p->size) {
+        p->curr_byte_indx += n;
+        update_curr_byte(p);
+        return true;
+    }
 
-  return false;
+    return false;
+}
+
+inline bool prev_n_bytes(Parser *p,  u64 n) {
+    if (p->curr_byte_indx - n < U64_MAX) {
+        p->curr_byte_indx -= n;
+        update_curr_byte(p);
+        return true;
+    }
+
+    return false;
 }
 
 inline void print_next_n_bytes(Parser *p, u64 n) {
@@ -48,38 +67,64 @@ inline void print_next_n_bytes(Parser *p, u64 n) {
     }
 }
 
+#define expect_byte(parser, byte) \
+    GB_ASSERT_MSG(p->curr_byte == byte, "expected %c, found: %c", (char)byte, (char)p->curr_byte)
+
+/*
 inline void expect_byte(Parser *p, u8 byte) {
-  GB_ASSERT(p->curr_byte == byte);
-  GB_ASSERT_MSG(next_byte(p), "expect_byte called at last byte");
+    GB_ASSERT_MSG(p->curr_byte == byte, "expected %c, found: %c", (char)byte, (char)p->curr_byte);
 }
-
-
+*/
 
 
 String parse_comment(Parser *p) {
-  expect_byte(p, '%');
+    expect_byte(p, '%');
 
-  String c{};
-  c.data = p->content + p->curr_byte_indx;
+    String c{};
+    
+    if (!next_byte(p)) {
+        return c;
+    }
 
-  u64 start_indx = p->curr_byte_indx;
+    c.data = p->content + p->curr_byte_indx;
 
-  while (p->curr_byte != '%') {
-    GB_ASSERT_MSG(next_byte(p), "unclosing comment, reached EOF");
-  }
+    u64 start_indx = p->curr_byte_indx;
 
-  c.size = p->curr_byte_indx - start_indx;
-  expect_byte(p, '%');
+    ADVANCE_IF(p, (p->curr_byte != '\n'));
 
-  if (c.size == 0) {
-    c.data = NULL;
-  }
 
-  return c;
+    if (!reached_eof(p)) {
+        expect_byte(p, '\n');
+    }
+
+    c.size = p->curr_byte_indx - start_indx;
+    return c;
 }
 
 inline void skip_space(Parser *p) {
     ADVANCE_IF(p, isspace(p->curr_byte));
+}
+
+u64 parse_uint_len(Parser *p, u8 len) {
+    GB_ASSERT_MSG(isdigit(p->curr_byte), "expected digit");
+    u64 start_indx = p->curr_byte_indx;
+
+    next_n_bytes(p, len);
+
+    u64 res {0};
+    u32 acc {1};
+    u32 end_indx = p->curr_byte_indx;
+
+    for (u32 i = end_indx - 1; i >= start_indx; i--) {
+        u8 digit = p->content[i];
+        GB_ASSERT_MSG(isdigit(digit), "expected digit");
+
+        u8 v = p->content[i] - '0';
+        res += v * acc;
+        acc *= 10;
+    }
+
+    return res;
 }
 
 u64 parse_uint(Parser *p) {
@@ -102,74 +147,154 @@ u64 parse_uint(Parser *p) {
 }
 
 String parse_ansi_string(Parser *p) {
-  GB_ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
+    GB_ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
 
-  String str{};
-  str.data = p->content + p->curr_byte_indx;
-  u64 start_indx = p->curr_byte_indx;
+    String str{};
+    str.data = p->content + p->curr_byte_indx;
+    u64 start_indx = p->curr_byte_indx;
 
-  ADVANCE_IF(p, isalpha(p->curr_byte));
+    ADVANCE_IF(p, isalpha(p->curr_byte));
 
-  str.size = p->curr_byte_indx - start_indx;
-  return str;
+    str.size = p->curr_byte_indx - start_indx;
+    return str;
 }
 
 
-void parse_xref_table(Parser *p) {
-   printf("found xref\n");
+// entry 20 bytes long
+// xxxxxxxxxx zzzzz z eol
+// 1          2     3
+//
+// 1: 10-digit byte offset
+// 2: 5-digit generation number
+// 3: in-use 'n' or free 'f'
+//
 
-   skip_space(p);
-   u64 obj_id = parse_uint(p);
-   skip_space(p);
-   u64 n_objs = parse_uint(p);
+xref_entry parse_xref_entry(Parser *p) {
+    GB_ASSERT_MSG(next_n_bytes(p, 20), "invalid xref entry: too short");
 
-   printf("%lu %lu", obj_id, n_objs);
+    // jump back to start
+    prev_n_bytes(p, 20);
+
+    u64 byte_offset = parse_uint_len(p, 10);
+
+    expect_byte(p, ' ');
+    next_byte(p);
+
+    u32 generation = (u32)parse_uint_len(p, 5);
+
+    expect_byte(p, ' ');
+    next_byte(p);
+
+    bool in_use = (p->curr_byte == 'n');
+
+    next_byte(p);
+    expect_byte(p, ' ');
+
+    next_byte(p);
+    expect_byte(p, '\n');
+
+    next_byte(p);
+
+    return xref_entry {
+        .byte_offset = byte_offset,
+        .generation = generation,
+        .in_use = in_use,
+    };
+}
+
+void print_xref_entry(const xref_entry &e) {
+    printf("%010lu %05u %c", e.byte_offset, e.generation, e.in_use ? 'n' : 'f');
+}
+
+void print_xref_table(const XRefTable &t) {
+    printf("xref\n");
+    printf("%u %u\n", t.obj_id, t.obj_count);
+    for (u64 i = 0; i < t.obj_count; i++) {
+        print_xref_entry(t.entries[i]);
+        println();
+    } 
+}
+
+XRefTable parse_xref_table(Parser *p) {
+    skip_space(p);
+    u32 obj_id = (u32)parse_uint(p);
+    skip_space(p);
+    u32 obj_count = (u32)parse_uint(p);
+    skip_space(p);
+
+    xref_entry *entries = (xref_entry *)malloc(obj_count * sizeof(xref_entry));
+
+    for (u64 i = 0; i < obj_count; i++) {
+        xref_entry e = parse_xref_entry(p);
+        *(entries + i) = e;
+    }
+
+    return XRefTable {
+        .obj_id = obj_id,
+            .obj_count = obj_count,
+            .entries = entries,
+    };
+}
+
+void delete_xref_table(XRefTable *t) {
+    free(t->entries);
 }
 
 
 inline Parser make_parser(u8 *content, u64 size) {
-  GB_ASSERT_MSG(size != 0, "empty pdf found");
-  GB_ASSERT_MSG(content != NULL, "empty pdf found");
+    GB_ASSERT_MSG(size != 0, "empty pdf found");
+    GB_ASSERT_MSG(content != NULL, "empty pdf found");
 
-  return Parser{
-      .content = content,
-      .size = size,
-      .curr_byte_indx = 0,
-      .curr_byte = content[0],
-      .parsed_pdf{},
-  };
+    return Parser{
+        .content = content,
+            .size = size,
+            .curr_byte_indx = 0,
+            .curr_byte = content[0],
+            .parsed_pdf{},
+    };
 }
 
 
 PDF parse_pdf(u8 *content, u64 size) {
-  Parser p = make_parser(content, size);
+    Parser p = make_parser(content, size);
 
-  if (p.curr_byte == '%') {
-    String header = parse_comment(&p);
-    print_string(header);
-    GB_ASSERT_MSG(next_n_bytes(&p, 9), "invalid pdf header");
-
-    p.parsed_pdf.header = header;
-  }
-
-  for (;;) {
     if (p.curr_byte == '%') {
-      parse_comment(&p);
-    } else if (isalpha(p.curr_byte)) {
-      String str = parse_ansi_string(&p);
+        String header = parse_comment(&p);
+        GB_ASSERT_MSG(next_n_bytes(&p, 9), "invalid pdf header");
 
-      if (match_string(str, "xref")) {
-          parse_xref_table(&p);
-      }
+        p.parsed_pdf.header = header;
     }
 
-    if (!next_byte(&p))
-      break;
-  }
+    for (;;) {
+        if (p.curr_byte == '%') {
+            parse_comment(&p);
+        } else if (isalpha(p.curr_byte)) {
+            String str = parse_ansi_string(&p);
 
-  return p.parsed_pdf;
+            if (match_string(str, "xref")) {
+                XRefTable table = parse_xref_table(&p);
+                p.parsed_pdf.xref_table = table;
+            }
+        }
+
+        if (!next_byte(&p))
+            break;
+    }
+
+    return p.parsed_pdf;
 }
 
+void print_parsed_pdf(const PDF &pdf) {
+    printf("%%");
+    print_string(pdf.header);
+    println();
+
+    print_xref_table(pdf.xref_table);
+}
+
+inline void delete_pdf(PDF *pdf) {
+    delete_xref_table(&pdf->xref_table);
+}
 
 
 void load_file(const char *path, u8 **buffer, u64 *size) {
@@ -193,13 +318,13 @@ void load_file(const char *path, u8 **buffer, u64 *size) {
 
 inline bool match_string(const String &s1, const char *s2) {
 
-  for (usize i = 0; i < s1.size; i++) {
-    char c = s2[i];
-    if (c == '\0' || c != s1.data[i])
-      return false;
-  }
+    for (usize i = 0; i < s1.size; i++) {
+        char c = s2[i];
+        if (c == '\0' || c != s1.data[i])
+            return false;
+    }
 
-  return s2[s1.size] == '\0';
+    return s2[s1.size] == '\0';
 }
 
 inline void print_string(const String &c) {

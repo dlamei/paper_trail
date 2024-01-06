@@ -76,6 +76,8 @@ static_assert(sizeof(usize) == sizeof(isize));
 #endif
 #endif
 
+inline void println() { printf("\n"); }
+
 
 ////////////////////////////////////////////////////////////////
 //
