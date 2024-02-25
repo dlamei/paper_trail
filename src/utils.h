@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <cstdlib>
 
+#include "stb_ds.h"
+
 // taken from [https://github.com/gingerBill/gb]
 
 typedef uint8_t   u8;
@@ -76,7 +78,8 @@ static_assert(sizeof(usize) == sizeof(isize));
 #endif
 #endif
 
-inline void println() { printf("\n"); }
+//inline void println() { printf("\n"); }
+#define println(...) do { printf(__VA_ARGS__); printf("\n"); } while (0)
 
 
 ////////////////////////////////////////////////////////////////
