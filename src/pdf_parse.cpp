@@ -98,10 +98,6 @@ inline void goto_position(Parser *p, u64 indx) {
     }
 }
 
-inline void skip_space(Parser *p) {
-    ADVANCE_IF(p, isspace(p->curr_byte));
-}
-
 
 // compares the next n bytes, consumes them if they are equal
 inline bool cmp_next_bytes(Parser *p, const char *bytes, u64 size) {
@@ -134,18 +130,24 @@ inline bool consume_byte(Parser *p, u8 byte) {
     return false;
 }
 
-#define CMP_NEXT_BYTES(parser, lit) \
-    cmp_next_bytes(parser, lit, sizeof(lit))
+#define CMP_CURR_BYTES(parser, lit) \
+    cmp_next_bytes(parser, lit, sizeof(lit) - 1)
 
-#define CMP_NEXT_BYTE(parser, byte) \
+#define CMP_CURR_BYTE(parser, byte) \
     parser->curr_byte == byte
 
-#define CONSUME_BYTE(parser, byte) \
+#define CONSUME_BYTES(parser, bytes) \
+    consume_bytes(parser, bytes, sizeof(bytes) - 1)
+
+#define EXPECT_BYTE(parser, byte) \
     GB_ASSERT_MSG(consume_byte(parser, byte), "expected %c, found: %c", (char)byte, (char)p->curr_byte)
 
-#define CONSUME_BYTES(parser, bytes) \
-    GB_ASSERT_MSG(consume_bytes(parser, bytes, sizeof(bytes)), "expected %s", bytes)
+#define EXPECT_BYTES(parser, bytes) \
+    GB_ASSERT_MSG(consume_bytes(parser, bytes, sizeof(bytes) - 1), "expected %s", bytes)
 
+inline void skip_space(Parser *p) {
+    ADVANCE_IF(p, isspace(p->curr_byte));
+}
 
 inline void print_next_n_bytes(Parser *p, u64 n) {
     u64 pos = cursor_position(p);
@@ -154,6 +156,14 @@ inline void print_next_n_bytes(Parser *p, u64 n) {
         if (!next_byte(p)) break;
     }
 
+    println(" ");
+    goto_position(p, pos);
+}
+
+inline void print_prev_n_bytes(Parser *p, u64 n) {
+    u64 pos = cursor_position(p);
+    back_n_bytes(p, n);
+    print_next_n_bytes(p, n);    
     goto_position(p, pos);
 }
 
@@ -174,7 +184,7 @@ Buffer parse_ansi_string(Parser *p) {
 
 Buffer parse_comment(Parser *p) {
     PRINT_PARSE_FN();
-    CONSUME_BYTE(p, '%');
+    EXPECT_BYTE(p, '%');
 
     Buffer c{};
     
@@ -241,12 +251,23 @@ inline void print_name(const Name &name) {
 
 // e.g /Name
 inline Name parse_name(Parser *p) {
+    Buffer buffer{};
+    u64 start = cursor_position(p);
+    buffer.data = p->content + start;
+
     PRINT_PARSE_FN();
-    CONSUME_BYTE(p, '/');
-    Buffer str = parse_ansi_string(p);
+    EXPECT_BYTE(p, '/');
+    GB_ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
+
+
+    ADVANCE_IF(p, !(CMP_CURR_BYTE(p, ' ') || CMP_CURR_BYTE(p, '/')
+                || CMP_CURR_BYTE(p, '<') || CMP_CURR_BYTE(p, '>')
+                || CMP_CURR_BYTE(p, '[') || CMP_CURR_BYTE(p, ']')
+                ));
+    buffer.size = cursor_position(p) - start;
 
     return Name {
-        .buffer = str
+        .buffer = buffer,
     };
 }
 
@@ -254,33 +275,106 @@ inline void print_string(const String &string) {
     print_buffer(string.buffer);
 }
 
-// e.g (The quick brown fox)
-inline String parse_doc_string(Parser *p) {
+inline void print_hex_string(const HexString &hex_str) {
+    //TODO
+}
+
+// e.g <FEFF005700720069007400650072>
+inline HexString parse_hex_string(Parser *p) {
     PRINT_PARSE_FN();
-    CONSUME_BYTE(p, '(');
+
+    EXPECT_BYTE(p, '<');
+    for (;;) {
+        if (p->curr_byte == '>' || !next_byte(p))
+            break;
+    }
+    EXPECT_BYTE(p, '>');
+
+    return HexString {};
+}
+
+// e.g (The quick brown fox)
+inline String parse_string(Parser *p) {
+    PRINT_PARSE_FN();
+    EXPECT_BYTE(p, '(');
     Buffer str = parse_ansi_string(p);
-    CONSUME_BYTE(p, ')');
+    EXPECT_BYTE(p, ')');
 
     return String {
         .buffer = str
     };
 }
 
-i64 parse_integer(Parser *p) {
+inline void print_boolean(const Boolean &boolean) {
+    if (boolean.value) {
+        printf("true");
+    } else {
+        printf("false");
+    }
+}
+
+Boolean parse_boolean(Parser *p) {
+    bool value = false;
+    if (CONSUME_BYTES(p, "true")) {
+       value = true;
+    } else if (CONSUME_BYTES(p, "false")) {
+        value = false;
+    } else {
+        GB_PANIC("could not parse boolean");
+    }
+
+    return Boolean {
+        .value = value,
+    };
+}
+
+inline void print_integer(const Integer &integer) {
+    printf("%li", integer.value);
+}
+
+bool try_parse_integer(Parser *p, Integer *out) {
     PRINT_PARSE_FN();
-    i8 sign = p->curr_byte == '-' ? -1 : 1;
+
+    u64 pos = cursor_position(p);
+
+    i8 sign = 1;
+    if (consume_byte(p, '-')) {
+        sign = -1;
+    }
+
+    if (!isdigit(p->curr_byte)) {
+        goto_position(p, pos);
+        return false;
+    }
+    u64 uint = parse_uint(p);
+
+    out->value = uint * sign;
+    return true;
+}
+
+Integer parse_integer(Parser *p) {
+    PRINT_PARSE_FN();
+
+    i8 sign = 1;
+    if (consume_byte(p, '-')) {
+        sign = -1;
+    }
+
     u64 uint = parse_uint(p);
     GB_ASSERT(uint < I64_MAX);
-    return sign * (i64)uint;
+    return Integer {
+        .value = sign * (i64)uint,
+    };
 }
 
 void print_reference(const Reference &ref) {
-    printf("%lu %lu %c", ref.obj_ref, ref.num, ref.c);
+    printf("%lu %lu R", ref.object_num, ref.generation);
 }
 
 // e.g 2 0 R
 Reference parse_reference(Parser *p) {
     PRINT_PARSE_FN();
+
 
     ASSERT_IS_DIGIT(p, "incorrect reference value");
     u64 obj_ref = parse_uint(p);
@@ -292,24 +386,20 @@ Reference parse_reference(Parser *p) {
     char c = p->curr_byte;
     ASSERT_NEXT_BYTE(p);
 
-    println("c value: %c", c);
-
-
     return Reference {
-        .obj_ref = obj_ref,
-        .num = num,
-        .c = c,
+        .object_num = obj_ref,
+        .generation = num,
     };
 }
 
 Stream parse_stream(Parser *p) {
-    CONSUME_BYTES(p, "stream");
+    EXPECT_BYTES(p, "stream");
 
     u64 start = cursor_position(p);
-    ADVANCE_IF(p, CMP_NEXT_BYTES(p, "endstream"));
+    ADVANCE_IF(p, !CMP_CURR_BYTES(p, "endstream"));
     u64 end = cursor_position(p);
 
-    CONSUME_BYTES(p, "endstream");
+    EXPECT_BYTES(p, "endstream");
 
     return Stream {
         .buffer = Buffer {
@@ -319,11 +409,20 @@ Stream parse_stream(Parser *p) {
     };
 }
 
-Object obj_from_integer(i64 integer) {
+Object obj_from_integer(Integer integer) {
     return Object {
         .kind = OBJ_INTEGER,
         .data = Object::data_t {
             .integer = integer,
+        },
+    };
+}
+
+Object obj_from_boolean(Boolean boolean) {
+    return Object {
+        .kind = OBJ_BOOLEAN,
+        .data = Object::data_t {
+            .boolean = boolean,
         },
     };
 }
@@ -337,11 +436,20 @@ Object obj_from_name(Name name) {
     };
 }
 
-Object obj_from_doc_string(String string) {
+Object obj_from_string(String string) {
     return Object {
         .kind = OBJ_STRING,
         .data = Object::data_t {
             .string = string,
+        },
+    };
+}
+
+Object obj_from_hex_string(HexString hex_str) {
+    return Object {
+        .kind = OBJ_HEX_STRING,
+        .data = Object::data_t {
+            .hex_string = hex_str,
         },
     };
 }
@@ -389,7 +497,7 @@ Array parse_array(Parser *p) {
     PRINT_PARSE_FN();
     Array array {};
 
-    CONSUME_BYTE(p, '[');
+    EXPECT_BYTE(p, '[');
 
     for (;;) {
         skip_space(p);
@@ -400,7 +508,7 @@ Array parse_array(Parser *p) {
         array.count += 1;
     }
     
-    CONSUME_BYTE(p, ']');
+    EXPECT_BYTE(p, ']');
 
     return array;
 }
@@ -409,7 +517,6 @@ inline void print_dictionary(const Dictionary &dict) {
     printf("<< ");
     
     for (u64 i = 0; i < dict.count; i++) {
-        print_name(dict.entries[i].name);
         print_object(dict.entries[i].object);
     }
 
@@ -418,12 +525,12 @@ inline void print_dictionary(const Dictionary &dict) {
 
 // e.g << /Three 3 /Five 5 >>
 Dictionary parse_dictionary(Parser *p) {
-    print_next_n_bytes(p, 20);
     PRINT_PARSE_FN();
+
     Dictionary dict {};
 
-    CONSUME_BYTE(p, '<');
-    CONSUME_BYTE(p, '<');
+    EXPECT_BYTE(p, '<');
+    EXPECT_BYTE(p, '<');
 
     for (;;) {
         skip_space(p);
@@ -440,70 +547,96 @@ Dictionary parse_dictionary(Parser *p) {
         dict.count += 1;
     }
 
-    CONSUME_BYTE(p, '>');
-    CONSUME_BYTE(p, '>');
+    EXPECT_BYTE(p, '>');
+    EXPECT_BYTE(p, '>');
 
     return dict;
 }
 
 inline void print_object(const Object &object) {
-    if (object.kind == OBJ_INTEGER) {
-        printf("%ld", object.data.integer);
-    } else if (object.kind == OBJ_NAME) {
-        print_name(object.data.name);
-    } else if (object.kind == OBJ_STRING) {
-        print_string(object.data.string);
-    } else if (object.kind == OBJ_ARRAY) {
-        print_array(object.data.array);
-    } else if (object.kind == OBJ_DICTIONARY) {
-        print_dictionary(object.data.dictionary);
-    } else if (object.kind == OBJ_REFERENCE) {
-        print_reference(object.data.reference);
-    } else {
-        GB_PANIC("unknown object kind: %u", object.kind);
+        if (object.kind == OBJ_INTEGER) {
+            print_integer(object.data.integer);
+        if (object.kind == OBJ_BOOLEAN) {
+            print_boolean(object.data.boolean);
+        } else if (object.kind == OBJ_NAME) {
+            print_name(object.data.name);
+        } else if (object.kind == OBJ_STRING) {
+            print_string(object.data.string);
+        } else if (object.kind == OBJ_HEX_STRING) {
+            print_hex_string(object.data.hex_string);
+        } else if (object.kind == OBJ_ARRAY) {
+            print_array(object.data.array);
+        } else if (object.kind == OBJ_DICTIONARY) {
+            print_dictionary(object.data.dictionary);
+        } else if (object.kind == OBJ_REFERENCE) {
+            print_reference(object.data.reference);
+        } else {
+            GB_PANIC("unknown object kind: %u", object.kind);
+        }
     }
 }
 
 Object parse_object(Parser *p) {
-    PRINT_PARSE_FN();
-    Object obj {};
 
+    PRINT_PARSE_FN();
     skip_space(p);
 
-    if (CMP_NEXT_BYTE(p, '/')) {
+
+    if (CMP_CURR_BYTE(p, '/')) {
         Name name = parse_name(p);
-        obj = obj_from_name(name);
+        return obj_from_name(name);
 
-    } else if (isdigit(p->curr_byte)) {
+    }else if (isdigit(p->curr_byte) || CMP_CURR_BYTE(p, '-')) {
         u64 tmp_pos = cursor_position(p);
-        i64 integer = parse_integer(p);
-        skip_space(p);
+        Integer int1, int2;
 
-        if (!isdigit(p->curr_byte)) {
-            obj = obj_from_integer(integer);
-        } else {
-            goto_position(p, tmp_pos);
-            Reference ref = parse_reference(p);
-            obj = obj_from_reference(ref);
+        int1 = parse_integer(p);
+        print_integer(int1);
+        skip_space(p);
+        
+        if (try_parse_integer(p, &int2)) {
+            skip_space(p);
+            if (consume_byte(p, 'R')) {
+                GB_ASSERT_MSG(int1.value >= 0 && int2.value >= 0, "negative ref numbers?");
+                Reference ref = Reference {
+                    .object_num = (u64)int1.value,
+                    .generation = (u64)int2.value,
+                };
+
+                return obj_from_reference(ref);
+            }
         }
 
-    } else if (CMP_NEXT_BYTE(p, '(')) {
-        String string = parse_doc_string(p);
-        obj = obj_from_doc_string(string);
+        return obj_from_integer(int1);
 
-    } else if (CMP_NEXT_BYTES(p, "<<")) {
+    } else if (CMP_CURR_BYTE(p, '(')) {
+        String string = parse_string(p);
+        return obj_from_string(string);
+
+    } else if (CMP_CURR_BYTES(p, "<<")) {
         Dictionary dict = parse_dictionary(p);
-        obj = obj_from_dictionary(dict);
+        return obj_from_dictionary(dict);
 
-    } else if (CMP_NEXT_BYTE(p, '[')) {
+    } else if (CMP_CURR_BYTE(p, '<')) {
+        HexString hex_str = parse_hex_string(p);
+        println("parse hexstring");
+        return obj_from_hex_string(hex_str);
+
+    } else if (CMP_CURR_BYTE(p, '[')) {
         Array dict = parse_array(p);
-        obj = obj_from_array(dict);
+        return obj_from_array(dict);
+
+    } else if (CONSUME_BYTES(p, "true")) {
+        Boolean boolean = Boolean { .value = true };
+        return obj_from_boolean(boolean);
+    } else if (CONSUME_BYTES(p, "false")) {
+        Boolean boolean = Boolean { .value = false };
+        return obj_from_boolean(boolean);
 
     } else {
-        GB_PANIC("unknown object type! (starts with %c)", p->curr_byte);
+        print_next_n_bytes(p, 15);
+        GB_PANIC("unknown object type! (starts with %c / %u)", p->curr_byte, (u8)p->curr_byte);
     }
-
-    return obj;
 }
 
 // entry 20 bytes long
@@ -523,9 +656,9 @@ XRefTable::entry parse_xref_entry(Parser *p) {
     back_n_bytes(p, 20);
 
     u64 byte_offset = parse_uint_len(p, 10);
-    CONSUME_BYTE(p, ' ');
+    EXPECT_BYTE(p, ' ');
     u32 generation = (u32)parse_uint_len(p, 5);
-    CONSUME_BYTE(p, ' ');
+    EXPECT_BYTE(p, ' ');
     bool in_use = (p->curr_byte == 'n');
     next_byte(p);
     skip_space(p);
@@ -553,9 +686,7 @@ void print_xref_table(const XRefTable &t) {
 XRefTable parse_xref_table(Parser *p) {
     PRINT_PARSE_FN();
 
-    print_next_n_bytes(p, 20);
-
-    CONSUME_BYTES(p, "xref");
+    EXPECT_BYTES(p, "xref");
     skip_space(p);
     u32 obj_id = (u32)parse_uint(p);
     skip_space(p);
@@ -627,29 +758,20 @@ PDF parse_pdf(u8 *content, u64 size) {
         if (p.curr_byte == '%') {
             COUNT_N_PARSED_BYTES ( parse_comment(&p) );
 
-        } else if (CMP_NEXT_BYTES(&p, "<<")) {
+        } else if (CMP_CURR_BYTES(&p, "<<")) {
             COUNT_N_PARSED_BYTES( Dictionary dict = parse_dictionary(&p) );
 
-        } else if (CMP_NEXT_BYTES(&p, "stream")) {
+        } else if (CMP_CURR_BYTES(&p, "stream")) {
             COUNT_N_PARSED_BYTES( Stream stream = parse_stream(&p) );
 
-        /* } else if (CMP_NEXT_BYTES(&p, "xref")) { */
-        /*     COUNT_N_PARSED_BYTES( XRefTable table = parse_xref_table(&p); ); */
-        /*     p.parsed_pdf.xref_table = table; */
+        } else if (CMP_CURR_BYTES(&p, "xref")) {
+            COUNT_N_PARSED_BYTES( XRefTable table = parse_xref_table(&p); );
+            p.parsed_pdf.xref_table = table;
 
-        /* } else { */
-        /*     if (!next_byte(&p)) { */
-        /*         break; */
-        /*     } */
-        /* } */
-        } else if (isalpha(p.curr_byte)) {
-            Buffer str = parse_ansi_string(&p);
-
-            if (match_buffer(str, "xref")) {
-                COUNT_N_PARSED_BYTES ( parse_xref_table(&p);)
+        } else {
+            if (!next_byte(&p)) {
+                break;
             }
-        } else if (!next_byte(&p)) {
-            break;
         }
 
     }

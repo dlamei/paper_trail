@@ -18,6 +18,8 @@ struct String {
     Buffer buffer {0};
 };
 
+struct HexString {
+};
 
 // e.g /Name
 struct Name {
@@ -25,9 +27,8 @@ struct Name {
 };
 
 struct Reference {
-    u64 obj_ref {0};
-    u64 num {0};
-    char c;
+    u64 object_num {0};
+    u64 generation {0};
 };
 
 struct Stream {
@@ -47,10 +48,20 @@ struct Dictionary {
     usize count {0};
 };
 
+struct Integer {
+    i64 value {0};
+};
+
+struct Boolean {
+    bool value {0};
+};
+
 enum ObjectKind: u32 {
     OBJ_NAME,
     OBJ_INTEGER,
+    OBJ_BOOLEAN,
     OBJ_STRING,
+    OBJ_HEX_STRING,
     OBJ_REFERENCE,
     OBJ_DICTIONARY,
     OBJ_ARRAY,
@@ -61,8 +72,10 @@ enum ObjectKind: u32 {
 struct Object {
     union data_t {
         Name name;
-        i64 integer;
+        Integer integer;
+        Boolean boolean;
         String string;
+        HexString hex_string;
         Reference reference;
 
         Array array;
@@ -110,7 +123,10 @@ void load_file(const char *path, u8 **buffer, u64 *size);
 
 void print_array(const Array &);
 void print_name(const Name &);
+void print_integer(const Name &);
+void print_boolean(const Name &);
 void print_string(const String &);
+void print_hex_string(const HexString &);
 void print_reference(const Reference &);
 void print_dictionary(const Dictionary &);
 void print_object(const Object &);
