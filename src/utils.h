@@ -1,10 +1,12 @@
 #pragma once
 
-#include <cstddef>
+#include <stddef.h>
 #include <stdint.h>
-#include <cstdarg>
+#include <stdarg.h>
 #include <stdio.h>
-#include <cstdlib>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <assert.h>
 
 #include "stb_ds.h"
 
@@ -25,20 +27,20 @@ typedef double f64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
 
-static_assert(sizeof(u8)  == sizeof(i8));
-static_assert(sizeof(u16) == sizeof(i16));
-static_assert(sizeof(u32) == sizeof(i32));
-static_assert(sizeof(u64) == sizeof(i64));
+static_assert(sizeof(u8)  == sizeof(i8), "type check");
+static_assert(sizeof(u16) == sizeof(i16), "type check");
+static_assert(sizeof(u32) == sizeof(i32), "type check");
+static_assert(sizeof(u64) == sizeof(i64), "type check");
 
-static_assert(sizeof(u8)  == 1);
-static_assert(sizeof(u16) == 2);
-static_assert(sizeof(u32) == 4);
-static_assert(sizeof(u64) == 8);
+static_assert(sizeof(u8)  == 1, "type check");
+static_assert(sizeof(u16) == 2, "type check");
+static_assert(sizeof(u32) == 4, "type check");
+static_assert(sizeof(u64) == 8, "type check");
 
-static_assert(sizeof(f32) == 4);
-static_assert(sizeof(f64) == 8);
+static_assert(sizeof(f32) == 4, "type check");
+static_assert(sizeof(f64) == 8, "type check");
 
-static_assert(sizeof(usize) == sizeof(isize));
+static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 #define U8_MIN 0u
 #define U8_MAX 0xffu
@@ -78,8 +80,8 @@ static_assert(sizeof(usize) == sizeof(isize));
 #endif
 #endif
 
-//inline void println() { printf("\n"); }
 #define println(...) do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#define local static
 
 
 ////////////////////////////////////////////////////////////////
@@ -90,27 +92,27 @@ static_assert(sizeof(usize) == sizeof(isize));
 //
 // NOTE: C++11 (and above) only!
 //
-extern "C++" {
-	template <typename T> struct gbRemoveReference       { typedef T Type; };
-	template <typename T> struct gbRemoveReference<T &>  { typedef T Type; };
-	template <typename T> struct gbRemoveReference<T &&> { typedef T Type; };
-
-	template <typename T> inline T &&gb_forward(typename gbRemoveReference<T>::Type &t)  { return static_cast<T &&>(t); }
-	template <typename T> inline T &&gb_forward(typename gbRemoveReference<T>::Type &&t) { return static_cast<T &&>(t); }
-	template <typename T> inline T &&gb_move   (T &&t)                                   { return static_cast<typename gbRemoveReference<T>::Type &&>(t); }
-	template <typename F>
-	struct gbprivDefer {
-		F f;
-		gbprivDefer(F &&f) : f(gb_forward<F>(f)) {}
-		~gbprivDefer() { f(); }
-	};
-	template <typename F> gbprivDefer<F> gb__defer_func(F &&f) { return gbprivDefer<F>(gb_forward<F>(f)); }
-
-	#define GB_DEFER_1(x, y) x##y
-	#define GB_DEFER_2(x, y) GB_DEFER_1(x, y)
-	#define GB_DEFER_3(x)    GB_DEFER_2(x, __COUNTER__)
-	#define defer(code)      auto GB_DEFER_3(_defer_) = gb__defer_func([&]()->void{code;})
-}
+//extern "C++" {
+//	template <typename T> struct gbRemoveReference       { typedef T Type; };
+//	template <typename T> struct gbRemoveReference<T &>  { typedef T Type; };
+//	template <typename T> struct gbRemoveReference<T &&> { typedef T Type; };
+//
+//	template <typename T> inline T &&gb_forward(typename gbRemoveReference<T>::Type &t)  { return static_cast<T &&>(t); }
+//	template <typename T> inline T &&gb_forward(typename gbRemoveReference<T>::Type &&t) { return static_cast<T &&>(t); }
+//	template <typename T> inline T &&gb_move   (T &&t)                                   { return static_cast<typename gbRemoveReference<T>::Type &&>(t); }
+//	template <typename F>
+//	struct gbprivDefer {
+//		F f;
+//		gbprivDefer(F &&f) : f(gb_forward<F>(f)) {}
+//		~gbprivDefer() { f(); }
+//	};
+//	template <typename F> gbprivDefer<F> gb__defer_func(F &&f) { return gbprivDefer<F>(gb_forward<F>(f)); }
+//
+//	#define GB_DEFER_1(x, y) x##y
+//	#define GB_DEFER_2(x, y) GB_DEFER_1(x, y)
+//	#define GB_DEFER_3(x)    GB_DEFER_2(x, __COUNTER__)
+//	#define defer(code)      auto GB_DEFER_3(_defer_) = gb__defer_func([&]()->void{code;})
+//}
 
 
 ////////////////////////////////////////////////////////////////
@@ -208,7 +210,7 @@ extern "C++" {
 } while (0)
 #endif
 
-inline void gb_assert_handler(char const *prefix, char const *condition, char const *file, i32 line, char const *msg, ...) {
+static void gb_assert_handler(char const *prefix, char const *condition, char const *file, i32 line, char const *msg, ...) {
 	fprintf(stderr, "%s(%d): %s: ", file, line, prefix);
 	if (condition)
 		fprintf(stderr, "`%s` ", condition);
