@@ -2,18 +2,24 @@
 
 #include "utils.h"
 
+
+typedef struct Buffer {
+    u8 *data;
+    u64 len;
+} Buffer;
+
 struct PDFObject;
 
 // Buffer holding the content of the PDF file
 typedef struct PDFContent {
     u8 *data;
-    usize size;
+    u64 size;
 } PDFContent;
 
 // slice of a PDFContent
 typedef struct PDFSlice {
     u8 *ptr;
-    usize len;
+    u64 len;
 } PDFSlice;
 
 typedef struct PDFNull {} PDFNull;
@@ -52,9 +58,13 @@ typedef struct Dictionary {
     u64 count;
 } Dictionary;
 
+typedef enum FilterKind {
+    FLATE_DECODE,
+} FilterKind;
+
 typedef struct Stream {
     Dictionary dict;
-    PDFSlice stream;
+    PDFSlice slice;
 } Stream;
 
 typedef struct Integer {
@@ -143,6 +153,8 @@ void free_pdf(PDF *);
 
 const char *obj_kind_to_str(PDFObjectKind kind);
 
+void print_pdf_slice(PDFSlice);
+void print_buffer(Buffer);
 void print_xref_entry(XRefEntry);
 void print_xref_table(XRefTable);
 void print_pdf_slice(PDFSlice);

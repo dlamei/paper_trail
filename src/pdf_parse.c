@@ -1,6 +1,9 @@
 #include "pdf_parse.h"
 
+#include "decompress.h"
 #include "utils.h"
+
+#include <zlib.h>
 
 #include <string.h>
 #include <ctype.h>
@@ -19,34 +22,33 @@
 #define PRINT_PARSE_FN() \
     /* printf("%s\n", BOOST_CURRENT_FUNCTION) */
 
-
 typedef struct Parser {
     u8 *buffer;
     u64 size;
-    u64 curr_byte_indx;
+    u64 cursor;
     u8 curr_byte;
 } Parser;
 
 u64 cursor_pos(Parser *p) {
-    return p->curr_byte_indx;
+    return p->cursor;
 }
 
 u8 *cursor_ptr(Parser *p) {
-    return p->buffer + p->curr_byte_indx;
+    return p->buffer + p->cursor;
 }
 
 bool reached_eof(Parser *p) {
-    return p->curr_byte_indx == p->size - 1;
+    return p->cursor == p->size - 1;
 }
 
 void update_curr_byte(Parser *p) {
-    p->curr_byte = p->buffer[p->curr_byte_indx];
+    p->curr_byte = p->buffer[p->cursor];
 }
 
 // false if eof was reached
 bool next_byte(Parser *p) {
-    if (p->curr_byte_indx + 1 < p->size) {
-        p->curr_byte_indx += 1;
+    if (p->cursor + 1 < p->size) {
+        p->cursor += 1;
         update_curr_byte(p);
         return true;
     }
@@ -55,8 +57,8 @@ bool next_byte(Parser *p) {
 }
 
 bool prev_byte(Parser *p) {
-    if (p->curr_byte_indx - 1 < U64_MAX) {
-        p->curr_byte_indx -= 1;
+    if (p->cursor - 1 < U64_MAX) {
+        p->cursor -= 1;
         update_curr_byte(p);
         return true;
     }
@@ -66,8 +68,8 @@ bool prev_byte(Parser *p) {
 
 // false if jumped over eof
 bool fwd_n_bytes(Parser *p, u64 n) {
-    if (p->curr_byte_indx + n < p->size) {
-        p->curr_byte_indx += n;
+    if (p->cursor + n < p->size) {
+        p->cursor += n;
         update_curr_byte(p);
         return true;
     }
@@ -76,8 +78,8 @@ bool fwd_n_bytes(Parser *p, u64 n) {
 }
 
 bool back_n_bytes(Parser *p,  u64 n) {
-    if (p->curr_byte_indx - n < U64_MAX) {
-        p->curr_byte_indx -= n;
+    if (p->cursor - n < U64_MAX) {
+        p->cursor -= n;
         update_curr_byte(p);
         return true;
     }
@@ -87,7 +89,7 @@ bool back_n_bytes(Parser *p,  u64 n) {
 
 local inline void goto_offset(Parser *p, u64 indx) {
     if (indx < p->size) {
-        p->curr_byte_indx = indx;
+        p->cursor = indx;
         update_curr_byte(p);
     } else {
         GB_PANIC("parser jump out of bounds");
@@ -149,6 +151,10 @@ void skip_space(Parser *p) {
     ADVANCE_IF(p, isspace(p->curr_byte));
 }
 
+void skip_newline(Parser *p) {
+    ADVANCE_IF(p, CURR_BYTE(p, '\n') || CURR_BYTE(p, '\r'));
+}
+
 void print_next_n_bytes(Parser *p, u64 n) {
     u64 pos = cursor_pos(p);
     for (u64 i = 0; i < n; i++) {
@@ -173,12 +179,12 @@ PDFSlice parse_ansi_string(Parser *p) {
     GB_ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
 
     PDFSlice str = {0};
-    str.ptr = p->buffer + p->curr_byte_indx;
-    u64 start_indx = p->curr_byte_indx;
+    str.ptr = p->buffer + p->cursor;
+    u64 start_indx = p->cursor;
 
     ADVANCE_IF(p, (isalpha(p->curr_byte) || isdigit(p->curr_byte)));
 
-    str.len = p->curr_byte_indx - start_indx;
+    str.len = p->cursor - start_indx;
     return str;
 }
 
@@ -188,16 +194,16 @@ PDFSlice parse_comment(Parser *p) {
 
     PDFSlice c = {0};
 
-    c.ptr = p->buffer + p->curr_byte_indx;
+    c.ptr = p->buffer + p->cursor;
 
-    u64 start_indx = p->curr_byte_indx;
+    u64 start_indx = p->cursor;
 
     ADVANCE_IF(p, (p->curr_byte != '\n'));
 
 
     skip_space(p);
 
-    c.len = p->curr_byte_indx - start_indx;
+    c.len = p->cursor - start_indx;
     return c;
 }
 
@@ -400,110 +406,21 @@ Stream parse_stream(Parser *p) {
     PRINT_PARSE_FN();
 
     EXPECT_BYTES(p, "stream");
+    skip_space(p);
 
     u64 start = cursor_pos(p);
     ADVANCE_IF(p, !CURR_BYTES(p, "endstream"));
-    u64 end = cursor_pos(p);
+    u64 end = cursor_pos(p) - 1;
 
     EXPECT_BYTES(p, "endstream");
 
     return (Stream) {
-        .stream = (PDFSlice) {
+        .slice = (PDFSlice) {
         .ptr = p->buffer + start,
         .len = end - start,
         }
     };
 }
-
-//PDFObject obj_from_integer(Integer integer) {
-//    return (PDFObject) {
-//        .kind = OBJ_INTEGER,
-//            .data = (union PDFObjectData) {
-//                .integer = integer,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_real(RealNumber real) {
-//    return (PDFObject) {
-//        .kind = OBJ_REAL_NUMBER,
-//            .data = (union PDFObjectData) {
-//                .real_number = real,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_boolean(Boolean boolean) {
-//    return (PDFObject) {
-//        .kind = OBJ_BOOLEAN,
-//            .data = (union PDFObjectData) {
-//                .boolean = boolean,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_name(Name name) {
-//    return (PDFObject) {
-//        .kind = OBJ_NAME,
-//            .data = (union PDFObjectData) {
-//                .name = name,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_string(PDFString string) {
-//    return (PDFObject) {
-//        .kind = OBJ_STRING,
-//            .data = (union PDFObjectData) {
-//                .string = string,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_hex_string(HexString hex_str) {
-//    return (PDFObject) {
-//        .kind = OBJ_HEX_STRING,
-//            .data = (union PDFObjectData) {
-//                .hex_string = hex_str,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_dictionary(Dictionary dictionary) {
-//    return (PDFObject) {
-//        .kind = OBJ_DICTIONARY,
-//            .data = (union PDFObjectData) {
-//                .dictionary = dictionary,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_stream(Stream stream) {
-//    return (PDFObject) {
-//        .kind = OBJ_STREAM,
-//            .data = (union PDFObjectData) {
-//                .stream = stream,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_array(ObjectArray array) {
-//    return (PDFObject) {
-//        .kind = OBJ_ARRAY,
-//            .data = (union PDFObjectData) {
-//                .array = array,
-//            },
-//    };
-//}
-//
-//PDFObject obj_from_reference(Reference reference) {
-//    return (PDFObject) {
-//        .kind = OBJ_REFERENCE,
-//            .data = (union PDFObjectData) {
-//                .reference = reference,
-//            },
-//    };
-//}
 
 // Integer or Real
 PDFObject parse_number(Parser *p) {
@@ -520,7 +437,7 @@ PDFObject parse_number(Parser *p) {
     if (sign == -1) {
         GB_ASSERT(uint < I64_MAX);
     }
-    i64 int_part = uint * sign;
+    i64 int_part = uint;
 
     if (consume_byte(p, '.')) {
         u64 frac_part = parse_uint(p);
@@ -533,6 +450,7 @@ PDFObject parse_number(Parser *p) {
         }
 
         f64 result = (float)int_part + (float)frac_part / scale;
+        result *= sign;
         return obj_from_real_number((RealNumber) {.value = result, });
     } else {
         return obj_from_integer((Integer) {.value = int_part, });
@@ -623,6 +541,8 @@ PDFObject parse_object(Parser *p) {
         if (CURR_BYTES(p, "stream")) {
             Stream stream = parse_stream(p);
             stream.dict = dict;
+            Buffer b = inflate_stream(&stream);
+
             return obj_from_stream(stream);
         } else {
             return obj_from_dictionary(dict);
@@ -741,7 +661,7 @@ Parser make_parser(u8 *content, u64 size) {
     return (Parser) {
         .buffer = content,
             .size = size,
-            .curr_byte_indx = 0,
+            .cursor = 0,
             .curr_byte = content[0],
     };
 }
@@ -797,51 +717,13 @@ PDF parse_pdf(PDFContent *content) {
     return pdf;
 };
 
-/* PDF parse_pdf(PDFContent *buff) { */
-/*     PRINT_PARSE_FN(); */
-/*     Parser p = make_parser(buff->data, buff->size); */
-
-/*     p.parsed_pdf.content = *buff; */
-/*     *buff = (PDFContent){0}; */
-
-/*     if (p.curr_byte == '%') { */
-/*         COUNT_N_PARSED_BYTES ( parse_header(&p);) */
-/*     } */
-
-/*     for (;;) { */
-
-/*         if (p.curr_byte == '%') { */
-/*             COUNT_N_PARSED_BYTES ( parse_comment(&p) ); */
-
-/*         } else if (CURR_BYTES(&p, "<<")) { */
-/*             COUNT_N_PARSED_BYTES( Dictionary dict = parse_dictionary(&p) ); */
-
-/*         } else if (CURR_BYTES(&p, "stream")) { */
-/*             COUNT_N_PARSED_BYTES( Stream stream = parse_stream(&p) ); */
-
-/*         } else if (CURR_BYTES(&p, "xref")) { */
-/*             COUNT_N_PARSED_BYTES( XRefTable table = parse_xref_table(&p); ); */
-/*             p.parsed_pdf.xref_table = table; */
-
-/*         } else { */
-/*             if (!next_byte(&p)) { */
-/*                 break; */
-/*             } */
-/*         } */
-
-/*     } */
-
-/*     return p.parsed_pdf; */
-/* } */
-
-
-
 PDFContent load_file(const char *path) {
     /* u64 _size = 0; */
     /* u8 *_buffer = NULL; */
 
     u8 *source = NULL;
     u64 bufsize = 0;
+    // SET_BIN_MODE?
     FILE *fp = fopen(path, "r");
     GB_ASSERT_MSG(fp, "could not open file: %s", path);
 

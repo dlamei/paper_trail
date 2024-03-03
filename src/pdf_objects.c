@@ -1,5 +1,7 @@
 #include "pdf_objects.h"
 
+#include <ctype.h>
+
 #define X(TYP, VAR, IDNT)               \
 PDFObject obj_from_##IDNT(TYP IDNT) {   \
     return (PDFObject) {                \
@@ -11,6 +13,20 @@ PDFObject obj_from_##IDNT(TYP IDNT) {   \
 }                                       
 X_PDF_OBJECTS
 #undef X
+
+void print_buffer(Buffer b) {
+    /* printf("%.*s", (u32)b.len, b.data); */ 
+    for (u64 i = 0; i < b.len; i++) {
+        char c = b.data[i];
+        if (isprint(c)) {
+            printf("%c", c); 
+        } else if (c == '\n' || c == '\r') {
+            printf("\n");
+        } else {
+            printf("\\x%02x", c);
+        }
+    }
+}
 
 void print_pdf_slice(PDFSlice c) {
     printf("%.*s", (u32)c.len, c.ptr); 
