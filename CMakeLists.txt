@@ -6,6 +6,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c17")
 project(papertrail C)
 
 add_subdirectory(zlib)
+include_directories(zlib)
 
 set(SOURCES
     src/pdf_parse.h

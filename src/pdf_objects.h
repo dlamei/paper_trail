@@ -22,7 +22,9 @@ typedef struct PDFSlice {
     u64 len;
 } PDFSlice;
 
-typedef struct PDFNull {} PDFNull;
+typedef struct PDFNull {
+    u8 __;
+} PDFNull;
 
 // e.g (The Quick Brown Fox)
 typedef struct PDFString {

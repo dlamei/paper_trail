@@ -604,10 +604,10 @@ PDFObject parse_object(Parser *p) {
         Boolean boolean = { .value = false };
         return obj_from_boolean(boolean);
     } else if (CONSUME_BYTES(p, "null")) {
-        return obj_from_pdf_null((PDFNull) {});
+        return obj_from_pdf_null((PDFNull) { 0 });
     } else if (CONSUME_BYTES(p, "obj")) {
 
-        PDFObject obj;
+        PDFObject obj = { 0 };
         while (!CURR_BYTES(p, "endobj")) {
             obj = parse_object(p);
             skip_space(p);
@@ -729,7 +729,7 @@ PDFTrailer parse_trailer(Parser *p) {
             skip_space(p);
             u64 table_offset = parse_uint(p);
 
-            return (PDFTrailer) {.xref_table_offset = table_offset, .dict = dict, };
+            return (PDFTrailer) { .xref_table_offset = table_offset, .dict = dict, };
         }
     }
     GB_PANIC("Could not find trailer, reached start of file");
@@ -750,6 +750,7 @@ PDF parse_pdf(PDFContent *content) {
     *content = (PDFContent){0};
 
     PDFTrailer trailer = parse_trailer(p);
+
     goto_offset(p, trailer.xref_table_offset);
     XRefTable table = parse_xref_table(p);
 
@@ -766,7 +767,7 @@ PDFContent load_file(const char *path) {
     u8 *source = NULL;
     u64 bufsize = 0;
     // SET_BIN_MODE?
-    FILE *fp = fopen(path, "r");
+    FILE *fp = fopen(path, "rb");
     GB_ASSERT_MSG(fp, "could not open file: %s", path);
 
     /* Go to the end of the file. */
@@ -777,6 +778,8 @@ PDFContent load_file(const char *path) {
 
         /* Allocate our buffer to that size. */
         source = malloc(sizeof(char) * (bufsize + 1));
+        GB_ASSERT(source);
+        memset(source, 0, bufsize + 1);
 
         /* Go back to the start of the file. */
         GB_ASSERT(fseek(fp, 0L, SEEK_SET) == 0);
