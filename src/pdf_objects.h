@@ -58,13 +58,25 @@ typedef struct Dictionary {
     u64 count;
 } Dictionary;
 
+
 typedef enum FilterKind {
+    NO_FILTER,
     FLATE_DECODE,
 } FilterKind;
+
+typedef struct StreamData {
+    u8 *ptr; 
+    u64 len;
+    // if true the stream is the owner of the decompressed memory
+    // and needs to free it
+    bool decompressed;
+} StreamData;
 
 typedef struct Stream {
     Dictionary dict;
     PDFSlice slice;
+    StreamData data;
+    /* Buffer decompressed; */
 } Stream;
 
 typedef struct Integer {
@@ -147,12 +159,22 @@ typedef struct PDF {
 X_PDF_OBJECTS
 #undef X
 
-void print_object_kind(PDFObjectKind);
+PDFObject *derefrence_object(PDFObject *obj, XRefTable table);
+
+bool cmp_name_str(Name n, const char *);
+
+// panics if not found
+DictionaryEntry *get_dict_entry(const Dictionary *d, const char *);
+// returns null if not found
+DictionaryEntry *find_dict_entry(const Dictionary *d, const char *);
+
 
 void free_pdf(PDF *);
 
+
 const char *obj_kind_to_str(PDFObjectKind kind);
 
+void print_object_kind(PDFObjectKind);
 void print_pdf_slice(PDFSlice);
 void print_buffer(Buffer);
 void print_xref_entry(XRefEntry);
@@ -168,6 +190,7 @@ void print_hex_string(HexString);
 void print_reference(Reference);
 void print_stream(Stream);
 void print_dictionary(Dictionary);
+void print_dict_entry(DictionaryEntry);
 void print_object(PDFObject);
 void print_pdf(PDF);
 

@@ -3,4 +3,4 @@
 #include "pdf_objects.h"
 
 
-Buffer inflate_stream(const Stream *s);
+StreamData inflate_stream(const Stream *s);

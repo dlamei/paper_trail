@@ -7,6 +7,7 @@
 
 const char *zret_to_str(i32 ret) {
     switch (ret) {
+        case Z_OK: return "OK";
         case Z_ERRNO: return "ERRNO";
         case Z_STREAM_ERROR: return "STREAM_ERROR";
         case Z_DATA_ERROR: return "DATA_ERROR";
@@ -34,7 +35,7 @@ local inline bool is_zerr(i32 ret) {
     }
 }
 
-Buffer inflate_stream(const Stream *s) {
+StreamData inflate_stream(const Stream *s) {
     i32 ret = Z_ERRNO;
     u8 *src = s->slice.ptr;
     u64 len = s->slice.len;
@@ -54,7 +55,7 @@ Buffer inflate_stream(const Stream *s) {
 
     strm.next_in = src;
     strm.total_in = strm.avail_in = len;
-    
+
     for (;;) {
         strm.next_out = out_buf;
         strm.avail_out = CHUNK;
@@ -70,16 +71,18 @@ Buffer inflate_stream(const Stream *s) {
         if (strm.avail_out != 0) break;
     }
 
-    inflateEnd(&strm);
-
     GB_ASSERT_MSG(ret == Z_STREAM_END, "deflate did not reach the end of the stream: %s", zret_to_str(ret));
 
-    return (Buffer) {
-        .data = out,
+    ret = inflateEnd(&strm);
+    GB_ASSERT(!is_zerr(ret));
+
+
+    return (StreamData) {
+        .ptr = out,
         .len = out_len,
+        .decompressed = true,
     };
 
 zerr:
     GB_PANIC("ZERROR: %s", zret_to_str(ret));
-    return (Buffer) {0};
 }

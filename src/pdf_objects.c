@@ -2,6 +2,51 @@
 
 #include <ctype.h>
 
+
+// TODO: inline reference?
+PDFObject *derefrence_object(PDFObject *obj, XRefTable table) {
+    if (obj->kind == OBJ_REFERENCE) {
+        Reference ref = obj->data.reference;
+        return derefrence_object(&table.objects[ref.object_num - 1], table);
+    } else {
+        return obj;
+    }
+}
+
+bool cmp_name_str(Name n, const char *str) {
+    u32 len = strlen(str);
+    if (n.slice.len != len) return false;
+
+    for (u32 i = 0; i < len; i++) {
+        if (n.slice.ptr[i] != str[i]) return false;
+    }
+
+    return true;
+}
+
+DictionaryEntry *find_dict_entry(const Dictionary *dict, const char *str) {
+    DictionaryEntry *ret = NULL;
+
+
+    for (u64 i = 0; i < dict->count; i++) {
+        DictionaryEntry *entry = &dict->entries[i];
+
+        if (cmp_name_str(entry->name, str)) {
+            ret = entry;
+            break;
+        }
+    }
+
+    return ret;
+}
+
+DictionaryEntry *get_dict_entry(const Dictionary *dict, const char *str) {
+    DictionaryEntry *ret = find_dict_entry(dict, str);
+    GB_ASSERT_MSG(ret, "could not find dict entry: %s", str);
+    return ret;
+}
+
+
 #define X(TYP, VAR, IDNT)               \
 PDFObject obj_from_##IDNT(TYP IDNT) {   \
     return (PDFObject) {                \
@@ -71,6 +116,12 @@ void print_array(ObjectArray array) {
         printf(" ");
     }
     printf("]");
+}
+
+void print_dict_entry(DictionaryEntry e) {
+    print_name(e.name);
+    printf(" ");
+    print_object(e.object);
 }
 
 void print_dictionary(Dictionary dict) {
@@ -147,29 +198,42 @@ void print_pdf(PDF pdf) {
     print_xref_table(pdf.xref_table);
 }
 
-void free_object(PDFObject *obj);
-
-local inline void free_dictionary(Dictionary *dict) {
-    for (u64 i = 0; i < dict->count; i++) {
-        free_object(&dict->entries[i].object);
-    }
-    arrfree(dict->entries);
+local inline void free_buffer(Buffer b) {
+    free(b.data);
 }
 
-local inline void free_array(ObjectArray *arr) {
-    for (u64 i = 0; i < arr->count; i++) {
-        free_object(&arr->data[i]);
+void free_object(PDFObject *obj);
+
+local inline void free_dictionary(Dictionary dict) {
+    for (u64 i = 0; i < dict.count; i++) {
+        free_object(&dict.entries[i].object);
     }
-    arrfree(arr->data);
+    arrfree(dict.entries);
+}
+
+local inline void free_stream(Stream s) {
+    free_dictionary(s.dict);
+    if (s.data.decompressed) {
+        free(s.data.ptr);
+    }
+}
+
+local inline void free_array(ObjectArray arr) {
+    for (u64 i = 0; i < arr.count; i++) {
+        free_object(&arr.data[i]);
+    }
+    arrfree(arr.data);
 }
 
 void free_object(PDFObject *obj) {
     switch (obj->kind) {
-        case OBJ_ARRAY      : { free_array(&obj->data.array); break; }
-        case OBJ_DICTIONARY : { free_dictionary(&obj->data.dictionary); break; }
-        case OBJ_STREAM     : { free_dictionary(&obj->data.stream.dict); break; }
+        case OBJ_ARRAY      : { free_array(obj->data.array); break; }
+        case OBJ_DICTIONARY : { free_dictionary(obj->data.dictionary); break; }
+        case OBJ_STREAM     : { free_stream(obj->data.stream); break; }
         default: break;
     }
+
+    *obj = (PDFObject) {0};
 }
 
 void free_xref_table(XRefTable *t) {
@@ -193,7 +257,7 @@ void free_pdf_content(PDFContent *c) {
 }
 
 void free_pdf(PDF *pdf) {
-    free_dictionary(&pdf->trailer.dict);
+    free_dictionary(pdf->trailer.dict);
     free_xref_table(&pdf->xref_table);
     free_pdf_content(&pdf->content);
 }

@@ -3,11 +3,8 @@
 #include "decompress.h"
 #include "utils.h"
 
-#include <zlib.h>
-
 #include <string.h>
 #include <ctype.h>
-#include <pthread.h>
 
 #define ASSERT_NEXT_BYTE(parser) \
     GB_ASSERT_MSG(next_byte(parser), "next_byte called at eof")
@@ -21,6 +18,7 @@
 
 #define PRINT_PARSE_FN() \
     /* printf("%s\n", BOOST_CURRENT_FUNCTION) */
+
 
 typedef struct Parser {
     u8 *buffer;
@@ -77,7 +75,7 @@ bool fwd_n_bytes(Parser *p, u64 n) {
     return false;
 }
 
-bool back_n_bytes(Parser *p,  u64 n) {
+local inline bool back_n_bytes(Parser *p,  u64 n) {
     if (p->cursor - n < U64_MAX) {
         p->cursor -= n;
         update_curr_byte(p);
@@ -254,11 +252,12 @@ u64 parse_uint(Parser *p) {
 // e.g /Name
 Name parse_name(Parser *p) {
     PDFSlice slice = {0};
-    u64 start = cursor_pos(p);
-    slice.ptr = p->buffer + start;
 
     PRINT_PARSE_FN();
     EXPECT_BYTE(p, '/');
+
+    u64 start = cursor_pos(p);
+    slice.ptr = p->buffer + start;
 
     ADVANCE_IF(p, !(CURR_BYTE(p, ' ') || CURR_BYTE(p, '/')
                 || CURR_BYTE(p, '<') || CURR_BYTE(p, '>')
@@ -410,14 +409,16 @@ Stream parse_stream(Parser *p) {
 
     u64 start = cursor_pos(p);
     ADVANCE_IF(p, !CURR_BYTES(p, "endstream"));
-    u64 end = cursor_pos(p) - 1;
+
+
+    u64 end = cursor_pos(p);
 
     EXPECT_BYTES(p, "endstream");
 
     return (Stream) {
         .slice = (PDFSlice) {
-        .ptr = p->buffer + start,
-        .len = end - start,
+            .ptr = p->buffer + start,
+                .len = end - start,
         }
     };
 }
@@ -508,6 +509,42 @@ Dictionary parse_dictionary(Parser *p) {
     return dict;
 }
 
+local inline StreamData parse_stream_data(Stream s) {
+    FilterKind filter = NO_FILTER;
+
+    for (u64 i = 0; i < s.dict.count; i++) {
+        DictionaryEntry *e = &s.dict.entries[i];
+        Name n = e->name;
+
+        if (cmp_name_str(n, "Filter")) {
+            if (e->object.kind != OBJ_NAME) GB_PANIC("Filter value is not a name!");
+            Name filter_name = e->object.data.name;
+
+            if (cmp_name_str(filter_name, "FlateDecode")) filter = FLATE_DECODE;
+            else {
+                printf("unknown filter: ");
+                print_name(filter_name);
+                printf("\n");
+                GB_PANIC("unknown filter\n");
+            }
+
+        } else if (cmp_name_str(n, "Length")) {
+            //TODO
+        } 
+    }
+
+    switch (filter) {
+        case FLATE_DECODE:  return inflate_stream(&s);
+        case NO_FILTER:     return (StreamData) {
+                                .ptr = s.slice.ptr,
+                                .len = s.slice.len,
+                                .decompressed = false 
+                            };
+
+        default: GB_PANIC("unhandled FilterKind: %u", filter);
+    }
+}
+
 PDFObject parse_object(Parser *p) {
 
     PRINT_PARSE_FN();
@@ -539,11 +576,15 @@ PDFObject parse_object(Parser *p) {
         skip_space(p);
 
         if (CURR_BYTES(p, "stream")) {
-            Stream stream = parse_stream(p);
-            stream.dict = dict;
-            Buffer b = inflate_stream(&stream);
+            Stream s = parse_stream(p);
+            s.dict = dict;
 
-            return obj_from_stream(stream);
+            FilterKind filter = NO_FILTER;
+
+            s.data = parse_stream_data(s);
+
+
+            return obj_from_stream(s);
         } else {
             return obj_from_dictionary(dict);
         }
@@ -607,7 +648,7 @@ XRefEntry parse_xref_entry(Parser *p) {
 
     return (XRefEntry) {
         .byte_offset = byte_offset,
-        .in_use = in_use,
+            .in_use = in_use,
     };
 }
 
@@ -636,6 +677,7 @@ XRefTable parse_xref_table(Parser *p) {
         goto_offset(p, offset);
 
         u64 id = parse_uint(p);
+        GB_ASSERT(id - 1 == i);
         skip_space(p);
         u64 gen = parse_uint(p);
         skip_space(p);
@@ -646,9 +688,9 @@ XRefTable parse_xref_table(Parser *p) {
 
     return (XRefTable) {
         .obj_id = obj_id,
-        .obj_count = obj_count,
-        .entries = entries,
-        .objects = objects,
+            .obj_count = obj_count,
+            .entries = entries,
+            .objects = objects,
     };
 
 }
@@ -713,7 +755,7 @@ PDF parse_pdf(PDFContent *content) {
 
     pdf.xref_table = table;
     pdf.trailer = trailer;
-    
+
     return pdf;
 };
 
@@ -751,6 +793,6 @@ PDFContent load_file(const char *path) {
 
     return (PDFContent) {
         .data = source,
-        .size = bufsize,
+            .size = bufsize,
     };
 }
