@@ -1,5 +1,7 @@
 #include "decompress.h"
 
+#include "stb_image.h"
+
 #include <zlib.h>
 
 #define CHUNK 16384
@@ -18,7 +20,7 @@ const char *zret_to_str(i32 ret) {
         case Z_STREAM_END: return "STREAM_END";
         case Z_NEED_DICT: return "Z_NEED_DICT";
 
-        default: GB_PANIC("unknown zret value: %i", ret);
+        default: PANIC("unknown zret value: %i", ret);
     }
 }
 
@@ -35,10 +37,10 @@ local inline bool is_zerr(i32 ret) {
     }
 }
 
-StreamData inflate_stream(const Stream *s) {
+StreamData inflate_stream(PDFSlice slice) {
     i32 ret = Z_ERRNO;
-    u8 *src = s->slice.ptr;
-    u64 len = s->slice.len;
+    u8 *src = slice.ptr;
+    u64 len = slice.len;
 
     z_stream strm = {0};
     strm.zalloc = Z_NULL;
@@ -71,10 +73,10 @@ StreamData inflate_stream(const Stream *s) {
         if (strm.avail_out != 0) break;
     }
 
-    GB_ASSERT_MSG(ret == Z_STREAM_END, "deflate did not reach the end of the stream: %s", zret_to_str(ret));
+    ASSERT_MSG(ret == Z_STREAM_END, "deflate did not reach the end of the stream: %s", zret_to_str(ret));
 
     ret = inflateEnd(&strm);
-    GB_ASSERT(!is_zerr(ret));
+    ASSERT(!is_zerr(ret));
 
 
     return (StreamData) {
@@ -84,5 +86,24 @@ StreamData inflate_stream(const Stream *s) {
     };
 
 zerr:
-    GB_PANIC("ZERROR: %s", zret_to_str(ret));
+    PANIC("ZERROR: %s", zret_to_str(ret));
+}
+
+StreamData dct_stream(PDFSlice slice) {
+    
+    i32 ret = Z_ERRNO;
+    u8 *buff = slice.ptr;
+    u64 len = slice.len;
+
+    int x, y, n_channels;
+
+    u8 *data = stbi_load_from_memory(buff, len, &x, &y, &n_channels, 0);
+
+    if (!data || stbi_failure_reason()) {
+        PANIC("Failed to load image: %s", stbi_failure_reason());
+	}
+
+    printf("x: %i, y: %i, n: %i\n", x, y, n_channels);
+
+    TODO;
 }

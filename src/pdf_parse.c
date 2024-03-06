@@ -7,14 +7,14 @@
 #include <ctype.h>
 
 #define ASSERT_NEXT_BYTE(parser) \
-    GB_ASSERT_MSG(next_byte(parser), "next_byte called at eof")
+    ASSERT_MSG(next_byte(parser), "next_byte called at eof")
 
 // will advance until cond is met or eof is reached
 #define ADVANCE_IF(parser, cond) \
     for (;;) if (!(cond) || !next_byte(parser)) break
 
 #define ASSERT_IS_DIGIT(parser, ...) \
-    GB_ASSERT_MSG(isdigit(parser->curr_byte), __VA_ARGS__)
+    ASSERT_MSG(isdigit(parser->curr_byte), __VA_ARGS__)
 
 #define PRINT_PARSE_FN() \
     /* printf("%s\n", BOOST_CURRENT_FUNCTION) */
@@ -90,7 +90,7 @@ local inline void goto_offset(Parser *p, u64 indx) {
         p->cursor = indx;
         update_curr_byte(p);
     } else {
-        GB_PANIC("parser jump out of bounds");
+        PANIC("parser jump out of bounds");
     }
 }
 
@@ -140,10 +140,10 @@ local inline bool consume_byte(Parser *p, u8 byte) {
     consume_bytes(parser, bytes, sizeof(bytes) - 1)
 
 #define EXPECT_BYTE(parser, byte) \
-    GB_ASSERT_MSG(consume_byte(parser, byte), "expected %c, found: %c", (char)byte, (char)p->curr_byte)
+    ASSERT_MSG(consume_byte(parser, byte), "expected %c, found: %c", (char)byte, (char)p->curr_byte)
 
 #define EXPECT_BYTES(parser, bytes) \
-    GB_ASSERT_MSG(consume_bytes(parser, bytes, sizeof(bytes) - 1), "could not find %s", bytes)
+    ASSERT_MSG(consume_bytes(parser, bytes, sizeof(bytes) - 1), "could not find %s", bytes)
 
 void skip_space(Parser *p) {
     ADVANCE_IF(p, isspace(p->curr_byte));
@@ -174,7 +174,7 @@ void print_prev_n_bytes(Parser *p, u64 n) {
 
 PDFSlice parse_ansi_string(Parser *p) {
     PRINT_PARSE_FN();
-    GB_ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
+    ASSERT_MSG(isalpha(p->curr_byte), "expected ascii character");
 
     PDFSlice str = {0};
     str.ptr = p->buffer + p->cursor;
@@ -219,7 +219,7 @@ u64 parse_uint_len(Parser *p, u8 len) {
 
     for (u32 i = end_pos - 1; i >= start_pos; i--) {
         u8 digit = p->buffer[i];
-        GB_ASSERT_MSG(isdigit(digit), "expected digit");
+        ASSERT_MSG(isdigit(digit), "expected digit");
 
         u8 v = p->buffer[i] - '0';
         res += v * acc;
@@ -267,7 +267,7 @@ Name parse_name(Parser *p) {
                 ));
     slice.len = cursor_pos(p) - start;
 
-    GB_ASSERT_MSG(slice.len != 0, "zero length name");
+    ASSERT_MSG(slice.len != 0, "zero length name");
 
     return (Name) { .slice = slice };
 }
@@ -331,7 +331,7 @@ Boolean parse_boolean(Parser *p) {
     } else if (CONSUME_BYTES(p, "false")) {
         value = false;
     } else {
-        GB_PANIC("could not parse boolean");
+        PANIC("could not parse boolean");
     }
 
     return (Boolean) { .value = value };
@@ -347,7 +347,7 @@ Integer parse_integer(Parser *p) {
     consume_byte(p, '+');
 
     u64 uint = parse_uint(p);
-    GB_ASSERT(uint < I64_MAX);
+    ASSERT(uint < I64_MAX);
     return (Integer) { .value = sign * (i64)uint, };
 }
 
@@ -436,7 +436,7 @@ PDFObject parse_number(Parser *p) {
     u64 uint = parse_uint(p);
 
     if (sign == -1) {
-        GB_ASSERT(uint < I64_MAX);
+        ASSERT(uint < I64_MAX);
     }
     i64 int_part = uint;
 
@@ -517,15 +517,17 @@ local inline StreamData parse_stream_data(Stream s) {
         Name n = e->name;
 
         if (cmp_name_str(n, "Filter")) {
-            if (e->object.kind != OBJ_NAME) GB_PANIC("Filter value is not a name!");
+            // TODO: filter array
+            if (e->object.kind != OBJ_NAME) PANIC("Filter value is not a name!");
             Name filter_name = e->object.data.name;
 
             if (cmp_name_str(filter_name, "FlateDecode")) filter = FLATE_DECODE;
+            else if (cmp_name_str(filter_name, "DCTDecode")) filter = DCT_DECODE;
             else {
                 printf("unknown filter: ");
                 print_name(filter_name);
                 printf("\n");
-                GB_PANIC("unknown filter\n");
+                PANIC("unknown filter\n");
             }
 
         } else if (cmp_name_str(n, "Length")) {
@@ -534,14 +536,15 @@ local inline StreamData parse_stream_data(Stream s) {
     }
 
     switch (filter) {
-        case FLATE_DECODE:  return inflate_stream(&s);
+        case FLATE_DECODE:  return inflate_stream(s.slice);
+        case DCT_DECODE:    return dct_stream(s.slice);
         case NO_FILTER:     return (StreamData) {
                                 .ptr = s.slice.ptr,
                                 .len = s.slice.len,
                                 .decompressed = false 
                             };
 
-        default: GB_PANIC("unhandled FilterKind: %u", filter);
+        default: PANIC("unhandled FilterKind: %u", filter);
     }
 }
 
@@ -583,7 +586,6 @@ PDFObject parse_object(Parser *p) {
 
             s.data = parse_stream_data(s);
 
-
             return obj_from_stream(s);
         } else {
             return obj_from_dictionary(dict);
@@ -618,7 +620,7 @@ PDFObject parse_object(Parser *p) {
         println("failed at:");
         print_next_n_bytes(p, 30);
         println(" ");
-        GB_PANIC("unknown object type! (starts with %c / %u)", p->curr_byte, (u8)p->curr_byte);
+        PANIC("unknown object type! (starts with %c / %u)", p->curr_byte, (u8)p->curr_byte);
     }
 }
 
@@ -633,7 +635,7 @@ PDFObject parse_object(Parser *p) {
 
 XRefEntry parse_xref_entry(Parser *p) {
     PRINT_PARSE_FN();
-    GB_ASSERT_MSG(fwd_n_bytes(p, 20), "invalid xref entry: too short");
+    ASSERT_MSG(fwd_n_bytes(p, 20), "invalid xref entry: too short");
 
     // jump back to start
     back_n_bytes(p, 20);
@@ -677,7 +679,7 @@ XRefTable parse_xref_table(Parser *p) {
         goto_offset(p, offset);
 
         u64 id = parse_uint(p);
-        GB_ASSERT(id - 1 == i);
+        ASSERT(id - 1 == i);
         skip_space(p);
         u64 gen = parse_uint(p);
         skip_space(p);
@@ -697,8 +699,8 @@ XRefTable parse_xref_table(Parser *p) {
 
 
 Parser make_parser(u8 *content, u64 size) {
-    GB_ASSERT_MSG(size != 0, "empty pdf found");
-    GB_ASSERT_MSG(content != NULL, "empty pdf found");
+    ASSERT_MSG(size != 0, "empty pdf found");
+    ASSERT_MSG(content != NULL, "empty pdf found");
 
     return (Parser) {
         .buffer = content,
@@ -714,7 +716,7 @@ Parser make_parser(u8 *content, u64 size) {
 void parse_header(Parser *p) {
     PRINT_PARSE_FN();
     PDFSlice header = parse_comment(p);
-    GB_ASSERT_MSG(fwd_n_bytes(p, 9), "invalid pdf header");
+    ASSERT_MSG(fwd_n_bytes(p, 9), "invalid pdf header");
 }
 
 PDFTrailer parse_trailer(Parser *p) {
@@ -732,7 +734,7 @@ PDFTrailer parse_trailer(Parser *p) {
             return (PDFTrailer) { .xref_table_offset = table_offset, .dict = dict, };
         }
     }
-    GB_PANIC("Could not find trailer, reached start of file");
+    PANIC("Could not find trailer, reached start of file");
 }
 
 #define COUNT_N_PARSED_BYTES(parse_fn) \
@@ -768,26 +770,26 @@ PDFContent load_file(const char *path) {
     u64 bufsize = 0;
     // SET_BIN_MODE?
     FILE *fp = fopen(path, "rb");
-    GB_ASSERT_MSG(fp, "could not open file: %s", path);
+    ASSERT_MSG(fp, "could not open file: %s", path);
 
     /* Go to the end of the file. */
     if (fseek(fp, 0L, SEEK_END) == 0) {
 
         bufsize = ftell(fp);
-        GB_ASSERT_MSG(bufsize != -1, "could not tell buffer size");
+        ASSERT_MSG(bufsize != -1, "could not tell buffer size");
 
         /* Allocate our buffer to that size. */
         source = malloc(sizeof(char) * (bufsize + 1));
-        GB_ASSERT(source);
+        ASSERT(source);
         memset(source, 0, bufsize + 1);
 
         /* Go back to the start of the file. */
-        GB_ASSERT(fseek(fp, 0L, SEEK_SET) == 0);
+        ASSERT(fseek(fp, 0L, SEEK_SET) == 0);
 
         /* read into memory */
         usize newLen = fread(source, sizeof(u8), bufsize, fp);
 
-        GB_ASSERT_MSG(ferror(fp) == 0, "Error reading file" );
+        ASSERT_MSG(ferror(fp) == 0, "Error reading file" );
 
         source[newLen++] = '\0';
     }

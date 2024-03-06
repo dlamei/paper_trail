@@ -3,4 +3,5 @@
 #include "pdf_objects.h"
 
 
-StreamData inflate_stream(const Stream *s);
+StreamData inflate_stream(PDFSlice);
+StreamData dct_stream(PDFSlice);

@@ -64,6 +64,7 @@ typedef struct Dictionary {
 typedef enum FilterKind {
     NO_FILTER,
     FLATE_DECODE,
+    DCT_DECODE
 } FilterKind;
 
 typedef struct StreamData {

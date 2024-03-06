@@ -42,7 +42,7 @@ DictionaryEntry *find_dict_entry(const Dictionary *dict, const char *str) {
 
 DictionaryEntry *get_dict_entry(const Dictionary *dict, const char *str) {
     DictionaryEntry *ret = find_dict_entry(dict, str);
-    GB_ASSERT_MSG(ret, "could not find dict entry: %s", str);
+    ASSERT_MSG(ret, "could not find dict entry: %s", str);
     return ret;
 }
 
@@ -150,7 +150,7 @@ const char *obj_kind_to_str(PDFObjectKind kind) {
         #define X(TYP, VAR, IDNT) case OBJ_##VAR : return #VAR;
         X_PDF_OBJECTS
         #undef X
-        default: GB_PANIC("unknown object kind: %u", kind);
+        default: PANIC("unknown object kind: %u", kind);
     }
 }
 
@@ -171,7 +171,7 @@ void print_object(PDFObject o) {
         case OBJ_ARRAY          : print_array(o.data.array); break;
         case OBJ_DICTIONARY     : print_dictionary(o.data.dictionary); break;
         case OBJ_STREAM         : print_stream(o.data.stream); break;
-        default: GB_PANIC("unhandled object kind: %s", obj_kind_to_str(o.kind));
+        default: PANIC("unhandled object kind: %s", obj_kind_to_str(o.kind));
     }
 }
 
@@ -237,8 +237,8 @@ void free_object(PDFObject *obj) {
 }
 
 void free_xref_table(XRefTable *t) {
-    GB_ASSERT(t->entries);
-    GB_ASSERT(t->objects);
+    ASSERT(t->entries);
+    ASSERT(t->objects);
 
     for (u64 i = 0; i < t->obj_count; i++) {
         free_object(&t->objects[i]);
@@ -251,7 +251,7 @@ void free_xref_table(XRefTable *t) {
 }
 
 void free_pdf_content(PDFContent *c) {
-    GB_ASSERT(c->data);
+    ASSERT(c->data);
     free(c->data);
     *c = (PDFContent){0};
 }

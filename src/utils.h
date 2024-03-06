@@ -108,10 +108,10 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 //	};
 //	template <typename F> gbprivDefer<F> gb__defer_func(F &&f) { return gbprivDefer<F>(gb_forward<F>(f)); }
 //
-//	#define GB_DEFER_1(x, y) x##y
-//	#define GB_DEFER_2(x, y) GB_DEFER_1(x, y)
-//	#define GB_DEFER_3(x)    GB_DEFER_2(x, __COUNTER__)
-//	#define defer(code)      auto GB_DEFER_3(_defer_) = gb__defer_func([&]()->void{code;})
+//	#define DEFER_1(x, y) x##y
+//	#define DEFER_2(x, y) DEFER_1(x, y)
+//	#define DEFER_3(x)    DEFER_2(x, __COUNTER__)
+//	#define defer(code)      auto DEFER_3(_defer_) = gb__defer_func([&]()->void{code;})
 //}
 
 
@@ -121,13 +121,13 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 //
 //
 
-#ifndef GB_JOIN_MACROS
-#define GB_JOIN_MACROS
-	#define GB_JOIN2_IND(a, b) a##b
+#ifndef JOIN_MACROS
+#define JOIN_MACROS
+	#define JOIN2_IND(a, b) a##b
 
-	#define GB_JOIN2(a, b)       GB_JOIN2_IND(a, b)
-	#define GB_JOIN3(a, b, c)    GB_JOIN2(GB_JOIN2(a, b), c)
-	#define GB_JOIN4(a, b, c, d) GB_JOIN2(GB_JOIN2(GB_JOIN2(a, b), c), d)
+	#define JOIN2(a, b)       JOIN2_IND(a, b)
+	#define JOIN3(a, b, c)    JOIN2(JOIN2(a, b), c)
+	#define JOIN4(a, b, c, d) JOIN2(JOIN2(JOIN2(a, b), c), d)
 #endif
 
 // from [boost/current_function.hpp](https://www.boost.org/doc/libs/1_62_0/boost/current_function.hpp)
@@ -174,39 +174,46 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 //
 
 
-#ifndef GB_DEBUG_TRAP
+#ifndef DEBUG_TRAP
 	#if defined(_MSC_VER)
 	 	#if _MSC_VER < 1300
-		#define GB_DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
+		#define DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
 		#else
-		#define GB_DEBUG_TRAP() __debugbreak()
+		#define DEBUG_TRAP() __debugbreak()
 		#endif
 	#else
-		#define GB_DEBUG_TRAP() abort()
+		#define DEBUG_TRAP() abort()
 	#endif
 #endif
 
-#ifndef GB_ASSERT_MSG
-#define GB_ASSERT_MSG(cond, msg, ...) do { \
+#ifndef ASSERT_MSG
+#define ASSERT_MSG(cond, msg, ...) do { \
 	if (!(cond)) { \
 		gb_assert_handler("Assertion Failure", #cond, __FILE__, (i64)__LINE__, msg, ##__VA_ARGS__); \
-		GB_DEBUG_TRAP(); \
+		DEBUG_TRAP(); \
 	} \
 } while (0)
 #endif
 
-#ifndef GB_ASSERT
-#define GB_ASSERT(cond) GB_ASSERT_MSG(cond, NULL)
+#ifndef ASSERT
+#define ASSERT(cond) ASSERT_MSG(cond, NULL)
 #endif
 
-#ifndef GB_ASSERT_NOT_NULL
-#define GB_ASSERT_NOT_NULL(ptr) GB_ASSERT_MSG((ptr) != NULL, #ptr " must not be NULL")
+#ifndef ASSERT_NOT_NULL
+#define ASSERT_NOT_NULL(ptr) ASSERT_MSG((ptr) != NULL, #ptr " must not be NULL")
 #endif
 
-#ifndef GB_PANIC
-#define GB_PANIC(msg, ...) do { \
+#ifndef PANIC
+#define PANIC(msg, ...) do { \
 	gb_assert_handler("Panic", NULL, __FILE__, (i64)__LINE__, msg, ##__VA_ARGS__); \
-	GB_DEBUG_TRAP(); \
+	DEBUG_TRAP(); \
+} while (0)
+#endif
+
+#ifndef TODO
+#define TODO do { \
+	gb_assert_handler("Panic", NULL, __FILE__, (i64)__LINE__, "not yet implemented"); \
+	DEBUG_TRAP(); \
 } while (0)
 #endif
 
