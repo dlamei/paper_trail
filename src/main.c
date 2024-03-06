@@ -1,5 +1,7 @@
 #include "pdf_parse.h"
 
+/* #include <jpeglib.h> */
+
 int main() {
 
     /* PDFContent file = load_file("../dummy.pdf"); */

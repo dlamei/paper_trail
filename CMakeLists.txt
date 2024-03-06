@@ -5,11 +5,13 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 
 project(papertrail C)
 
-add_subdirectory(zlib)
-include_directories(zlib)
+add_subdirectory(vendor/zlib)
+include_directories(vendor/zlib)
 
-add_subdirectory(mozjpeg)
-include_directories(mozjpeg)
+set(MOZJPEG_DIR ${CMAKE_SOURCE_DIR}/vendor/mozjpeg)
+set(MOZJPEG_OUT_ROOT ${CMAKE_BINARY_DIR}/mozjpeg)
+set(MOZJPEG_OUT ${MOZJPEG_OUT_ROOT}/release)
+
 
 set(SOURCES
     src/pdf_parse.h
@@ -24,8 +26,22 @@ set(SOURCES
     src/stb.c
 )
 
+execute_process(
+    COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
+    )
+
 add_executable(papertrail ${SOURCES} src/main.c)
 
-target_link_libraries(papertrail zlib m)
+add_custom_target(
+    TARGET papertrail
+    POST_BUILD
+    DEPENDS ${SOURCES} src/main.c # rebuild on change
+    COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
+)
 
-# target_link_libraries(paper_trail ${CMAKE_DL_LIBS})
+find_library(MOZJPEG_LIB mozjpeg_sys HINTS ${MOZJPEG_OUT} REQUIRED)
+target_link_libraries(papertrail zlib m ${MOZJPEG_LIB})
+
+include_directories(${MOZJPEG_OUT}/build/include) # generated headers
+include_directories(${MOZJPEG_DIR}/include) # default headers
+
