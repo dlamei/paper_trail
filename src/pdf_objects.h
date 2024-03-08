@@ -5,7 +5,7 @@
 
 typedef struct Buffer {
     u8 *data;
-    u64 len;
+    u64 size;
 } Buffer;
 
 struct PDFObject;
@@ -23,7 +23,7 @@ typedef struct PDFSlice {
 } PDFSlice;
 
 typedef struct PDFNull {
-    u8 __;
+    u8 null; // because some compilers dont allow 0 size structs
 } PDFNull;
 
 // e.g (The Quick Brown Fox)
@@ -60,27 +60,44 @@ typedef struct Dictionary {
     u64 count;
 } Dictionary;
 
+typedef struct RawImage {
+    u8 *data;
+    u32 width;
+    u32 height;
+    u8 n_channels;
+} RawImage;
 
-typedef enum FilterKind {
-    NO_FILTER,
-    FLATE_DECODE,
-    DCT_DECODE
-} FilterKind;
+enum FilterKind {
+    FILTER_KIND_NONE,
+    FILTER_KIND_FLATE,
+    FILTER_KIND_DCT,
+    FILTER_KIND_CCITTFAX,
+};
 
-typedef struct StreamData {
-    u8 *ptr; 
-    u64 len;
-    // if true the stream is the owner of the decompressed memory
-    // and needs to free it
-    bool decompressed;
-} StreamData;
+enum StreamDataKind {
+    STREAM_DATA_BUFFER,
+    STREAM_DATA_IMAGE,
+    STREAM_DATA_NONE, // only raw_stream
+};
 
+union StreamData {
+    Buffer buffer;
+    RawImage image;
+};
+
+// points to the encoded pdf stream
 typedef struct Stream {
     Dictionary dict;
     PDFSlice slice;
-    StreamData data;
-    /* Buffer decompressed; */
+    enum FilterKind filter_kind;
 } Stream;
+
+typedef struct DecodedStream {
+    enum StreamDataKind kind;
+    union StreamData data;
+    Stream raw_stream;
+
+} DecodedStream;
 
 typedef struct Integer {
     i64 value;
@@ -96,23 +113,24 @@ typedef struct Boolean {
 
 // X(type, enum, var_name)
 #define X_PDF_OBJECTS            \
-    X(PDFNull, NULL, pdf_null)              \
-    X(Name, NAME, name)                     \
-    X(Integer, INTEGER, integer)            \
-    X(RealNumber, REAL_NUMBER, real_number) \
-    X(Boolean, BOOLEAN, boolean)            \
-    X(PDFString, STRING, string)            \
-    X(HexString, HEX_STRING, hex_string)    \
-    X(Reference, REFERENCE, reference)      \
-    X(Dictionary, DICTIONARY, dictionary)   \
-    X(Stream, STREAM, stream)               \
-    X(ObjectArray, ARRAY, array)            \
+    X(PDFNull, NULL, pdf_null)                       \
+    X(Name, NAME, name)                              \
+    X(Integer, INTEGER, integer)                     \
+    X(RealNumber, REAL_NUMBER, real_number)          \
+    X(Boolean, BOOLEAN, boolean)                     \
+    X(PDFString, STRING, string)                     \
+    X(HexString, HEX_STRING, hex_string)             \
+    X(Reference, REFERENCE, reference)               \
+    X(Dictionary, DICTIONARY, dictionary)            \
+    X(Stream, STREAM, stream)                        \
+    X(DecodedStream, DECODED_STREAM, decoded_stream) \
+    X(ObjectArray, ARRAY, array)                     \
 
-typedef enum PDFObjectKind {
+enum PDFObjectKind {
 #define X(a, b, c) OBJ_##b,
 X_PDF_OBJECTS
 #undef X
-} PDFObjectKind;
+};
 
 union PDFObjectData {
 #define X(a, b, c) a c;
@@ -121,7 +139,7 @@ X_PDF_OBJECTS
 };
 
 typedef struct PDFObject {
-    PDFObjectKind kind;
+    enum PDFObjectKind kind;
     union PDFObjectData data;
 } PDFObject;
 
@@ -136,6 +154,7 @@ typedef struct XRefEntry {
     // u32 generation
 } XRefEntry;
 
+//TODO: objects not in use
 typedef struct XRefTable {
     u32 obj_id;
     u32 obj_count;
@@ -175,9 +194,9 @@ DictionaryEntry *find_dict_entry(const Dictionary *d, const char *);
 void free_pdf(PDF *);
 
 
-const char *obj_kind_to_str(PDFObjectKind kind);
+const char *obj_kind_to_str(enum PDFObjectKind kind);
 
-void print_object_kind(PDFObjectKind);
+void print_object_kind(enum PDFObjectKind);
 void print_pdf_slice(PDFSlice);
 void print_buffer(Buffer);
 void print_xref_entry(XRefEntry);

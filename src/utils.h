@@ -188,10 +188,10 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 #ifndef ASSERT_MSG
 #define ASSERT_MSG(cond, msg, ...) do { \
-	if (!(cond)) { \
-		gb_assert_handler("Assertion Failure", #cond, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, msg, ##__VA_ARGS__); \
-		DEBUG_TRAP(); \
-	} \
+    if (!(cond)) { \
+        gb_assert_handler("Assertion Failure", #cond, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, msg, ##__VA_ARGS__); \
+        DEBUG_TRAP(); \
+    } \
 } while (0)
 #endif
 
@@ -205,28 +205,28 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 #ifndef PANIC
 #define PANIC(msg, ...) do { \
-	gb_assert_handler("Panic", NULL, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, msg, ##__VA_ARGS__); \
-	DEBUG_TRAP(); \
+    gb_assert_handler("Panic", NULL, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, msg, ##__VA_ARGS__); \
+    DEBUG_TRAP(); \
 } while (0)
 #endif
 
 #ifndef TODO
 #define TODO do { \
-	gb_assert_handler("Panic", NULL, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, "not yet implemented"); \
-	DEBUG_TRAP(); \
+    gb_assert_handler("Panic", NULL, __FILE__, BOOST_CURRENT_FUNCTION, (i64)__LINE__, "not yet implemented"); \
+    DEBUG_TRAP(); \
 } while (0)
 #endif
 
 static void gb_assert_handler(char const *prefix, char const *condition, char const *file, char const *function, i32 line, char const *msg, ...) {
-	fprintf(stderr, "%s::%s::(%d)::\n%s:", file, function, line, prefix);
-	if (condition)
-		fprintf(stderr, "`%s` ", condition);
-	if (msg) {
-		va_list va;
-		va_start(va, msg);
-		vfprintf(stderr, msg, va);
-		va_end(va);
-	}
-	fprintf(stderr, "\n");
+    fprintf(stderr, "%s::%s::(%d)::\n%s:", file, function, line, prefix);
+    if (condition)
+        fprintf(stderr, "`%s` ", condition);
+    if (msg) {
+        va_list va;
+        va_start(va, msg);
+        vfprintf(stderr, msg, va);
+        va_end(va);
+    }
+    fprintf(stderr, "\n");
 }
 

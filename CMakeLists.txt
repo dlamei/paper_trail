@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -O3")
 # -Wall -Wextra -Wundef -Wcast-align -Wcast-qual -Wswitch-enum -g")
 
 project(papertrail C)
@@ -39,7 +39,7 @@ add_executable(papertrail ${SOURCES} src/main.c)
 #     COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
 # )
 
-find_library(MOZJPEG_LIB mozjpeg_sys HINTS ${MOZJPEG_OUT} REQUIRED)
+find_library(MOZJPEG_LIB mozjpeg HINTS ${MOZJPEG_OUT} REQUIRED)
 target_link_libraries(papertrail zlib ${MOZJPEG_LIB})
 
 if (UNIX)

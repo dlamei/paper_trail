@@ -61,7 +61,7 @@ X_PDF_OBJECTS
 
 void print_buffer(Buffer b) {
     /* printf("%.*s", (u32)b.len, b.data); */ 
-    for (u64 i = 0; i < b.len; i++) {
+    for (u64 i = 0; i < b.size; i++) {
         char c = b.data[i];
         if (isprint(c)) {
             printf("%c", c); 
@@ -145,7 +145,7 @@ void print_null(PDFNull n) {
     printf("null");
 }
 
-const char *obj_kind_to_str(PDFObjectKind kind) {
+const char *obj_kind_to_str(enum PDFObjectKind kind) {
     switch (kind) {
         #define X(TYP, VAR, IDNT) case OBJ_##VAR : return #VAR;
         X_PDF_OBJECTS
@@ -154,7 +154,7 @@ const char *obj_kind_to_str(PDFObjectKind kind) {
     }
 }
 
-void print_object_kind(PDFObjectKind kind) {
+void print_object_kind(enum PDFObjectKind kind) {
     printf("%s", obj_kind_to_str(kind));
 }
 
@@ -202,6 +202,10 @@ local inline void free_buffer(Buffer b) {
     free(b.data);
 }
 
+local inline void free_image(RawImage img) {
+    free(img.data);
+}
+
 void free_object(PDFObject *obj);
 
 local inline void free_dictionary(Dictionary dict) {
@@ -213,9 +217,18 @@ local inline void free_dictionary(Dictionary dict) {
 
 local inline void free_stream(Stream s) {
     free_dictionary(s.dict);
-    if (s.data.decompressed) {
-        free(s.data.ptr);
+}
+
+local inline void free_decoded_stream(DecodedStream ds) {
+    switch (ds.kind) {
+    case STREAM_DATA_BUFFER: { free_buffer(ds.data.buffer); break; }
+    case STREAM_DATA_IMAGE:  { free_image(ds.data.image); break; }
+
+    case STREAM_DATA_NONE:
+      break;
     }
+
+    free_stream(ds.raw_stream);
 }
 
 local inline void free_array(ObjectArray arr) {
@@ -227,16 +240,26 @@ local inline void free_array(ObjectArray arr) {
 
 void free_object(PDFObject *obj) {
     switch (obj->kind) {
-        case OBJ_ARRAY      : { free_array(obj->data.array); break; }
-        case OBJ_DICTIONARY : { free_dictionary(obj->data.dictionary); break; }
-        case OBJ_STREAM     : { free_stream(obj->data.stream); break; }
-        default: break;
-    }
+        case OBJ_ARRAY          : { free_array(obj->data.array); break; }
+        case OBJ_DICTIONARY     : { free_dictionary(obj->data.dictionary); break; }
+        case OBJ_STREAM         : { free_stream(obj->data.stream); break; }
+        case OBJ_DECODED_STREAM : { free_decoded_stream(obj->data.decoded_stream); break; }
+
+        case OBJ_NULL:
+        case OBJ_NAME:
+        case OBJ_INTEGER:
+        case OBJ_REAL_NUMBER:
+        case OBJ_BOOLEAN:
+        case OBJ_STRING:
+        case OBJ_HEX_STRING:
+        case OBJ_REFERENCE:
+          break;
+        }
 
     *obj = (PDFObject) {0};
 }
 
-void free_xref_table(XRefTable *t) {
+local inline void free_xref_table(XRefTable *t) {
     ASSERT(t->entries);
     ASSERT(t->objects);
 
@@ -250,7 +273,7 @@ void free_xref_table(XRefTable *t) {
     *t = (XRefTable){0};
 }
 
-void free_pdf_content(PDFContent *c) {
+local inline void free_pdf_content(PDFContent *c) {
     ASSERT(c->data);
     free(c->data);
     *c = (PDFContent){0};

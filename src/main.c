@@ -8,7 +8,7 @@ int main(void) {
     PDFContent file = load_file("NUMPDE.pdf");
     PDF pdf = parse_pdf(&file);
 
-    print_pdf(pdf);
+    /* print_pdf(pdf); */
 
     free_pdf(&pdf);
 

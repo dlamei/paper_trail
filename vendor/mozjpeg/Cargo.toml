@@ -1,5 +1,5 @@
 [package]
-name = "mozjpeg-sys"
+name = "mozjpeg"
 build = "src/build.rs"
 version = "0.1.0"
 edition = "2021"
@@ -41,9 +41,5 @@ jpeg80_abi = ["jpeg70_abi"]
 nasm_simd_parallel_build = ["nasm_simd", "parallel"]
 
 [lib]
-name = "mozjpeg_sys"
+name = "mozjpeg"
 crate-type = ["staticlib", "lib"]
-
-# [package.metadata.docs.rs]
-# targets = ["x86_64-unknown-linux-gnu"]
-# rustdoc-args = ["--generate-link-to-definition"]

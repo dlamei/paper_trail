@@ -2,7 +2,6 @@
 
 
 #include <jpeglib.h>
-#include <setjmp.h>
 #include <zlib.h>
 
 #define CHUNK 16384
@@ -38,10 +37,10 @@ local inline bool is_zerr(i32 ret) {
 	}
 }
 
-StreamData inflate_stream(PDFSlice slice) {
+DecodedStream inflate_decode(Stream *stream) {
 	i32 ret = Z_ERRNO;
-	u8 *src = slice.ptr;
-	u64 len = slice.len;
+	u8 *src = stream->slice.ptr;
+	u64 len = stream->slice.len;
 
 	z_stream strm = { 0 };
 	strm.zalloc = Z_NULL;
@@ -80,39 +79,66 @@ StreamData inflate_stream(PDFSlice slice) {
 	ASSERT(!is_zerr(ret));
 
 
-	return (StreamData) {
-		.ptr = out,
-			.len = out_len,
-			.decompressed = true,
-	};
+    Buffer buffer = {
+        .data = out,
+        .size = out_len,
+    };
+
+    return (DecodedStream) {
+        .data = (union StreamData) { .buffer = buffer },
+        .kind = STREAM_DATA_BUFFER,
+        .raw_stream = *stream,
+    };
 
 zerr:
 	PANIC("ZERROR: %s", zret_to_str(ret));
 }
 
-jmp_buf jump_buffer;
-struct jpeg_error_mgr jerr;
 
-void jpeglib_error_exit(j_common_ptr cinfo) {
-	(*cinfo->err->output_message)(cinfo);
-	longjmp(jump_buffer, 1);
-}
+DecodedStream dct_decode(Stream *stream) {
+    u32 width = 0;
+    u32 height = 0;
+    u64 size = 0;
+    u32 n_channels = 0;
+    u8 *data = NULL;
 
+    struct jpeg_decompress_struct info;
+    struct jpeg_error_mgr err;
 
-StreamData dct_stream(PDFSlice slice) {
-	struct jpeg_decompress_struct info;
-	struct jpeg_error_mgr err;
+    info.err = jpeg_std_error(&err);
+    jpeg_create_decompress(&info);
 
-	info.err = jpeg_std_error(&err);
-	jpeg_create_decompress(&info);
+    jpeg_mem_src(&info, stream->slice.ptr, stream->slice.len);
+    (void)jpeg_read_header(&info, true);
+    (void)jpeg_start_decompress(&info);
 
-	u64 width = 0;
-	u64 height = 0;
-	u32 n_components = 0;
+    width = info.output_width;
+    height = info.output_height;
+    n_channels = info.num_components;
 
-	return (StreamData) {
-		.ptr = NULL,
-			.len = 0,
-			.decompressed = true,
-	};
+    size = width * height * n_channels;
+    u32 row_stride = width * n_channels;
+    data = malloc(size * sizeof(u8));
+
+    u8 *out_scanlines_ptr[1] = {0}; // for now only 1 scanline at the time
+    while (info.output_scanline < info.output_height) {
+        out_scanlines_ptr[0] = &data[row_stride * info.output_scanline];
+        (void) jpeg_read_scanlines(&info, out_scanlines_ptr, 1);
+    }
+
+    jpeg_finish_decompress(&info);
+    jpeg_destroy_decompress(&info);
+
+    RawImage image = {
+        .data = data,
+        .width = width,
+        .height = height,
+        .n_channels = n_channels,
+    };
+
+    return (DecodedStream) {
+        .data = (union StreamData) { .image = image },
+        .kind = STREAM_DATA_IMAGE,
+        .raw_stream = *stream,
+    };
 }

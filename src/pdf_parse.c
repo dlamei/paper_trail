@@ -509,11 +509,11 @@ Dictionary parse_dictionary(Parser *p) {
     return dict;
 }
 
-local inline StreamData parse_stream_data(Stream s) {
-    FilterKind filter = NO_FILTER;
+local DecodedStream parse_stream_data(Stream *s) {
+    enum FilterKind filter = FILTER_KIND_NONE;
 
-    for (u64 i = 0; i < s.dict.count; i++) {
-        DictionaryEntry *e = &s.dict.entries[i];
+    for (u64 i = 0; i < s->dict.count; i++) {
+        DictionaryEntry *e = &s->dict.entries[i];
         Name n = e->name;
 
         if (cmp_name_str(n, "Filter")) {
@@ -521,8 +521,9 @@ local inline StreamData parse_stream_data(Stream s) {
             if (e->object.kind != OBJ_NAME) PANIC("Filter value is not a name!");
             Name filter_name = e->object.data.name;
 
-            if (cmp_name_str(filter_name, "FlateDecode")) filter = FLATE_DECODE;
-            else if (cmp_name_str(filter_name, "DCTDecode")) filter = DCT_DECODE;
+            if (cmp_name_str(filter_name, "FlateDecode")) filter = FILTER_KIND_FLATE;
+            else if (cmp_name_str(filter_name, "DCTDecode")) filter = FILTER_KIND_DCT;
+            else if (cmp_name_str(filter_name, "CCITTFaxDecode")) filter = FILTER_KIND_CCITTFAX;
             else {
                 printf("unknown filter: ");
                 print_name(filter_name);
@@ -535,14 +536,17 @@ local inline StreamData parse_stream_data(Stream s) {
         } 
     }
 
+    s->filter_kind = filter;
+
     switch (filter) {
-        case FLATE_DECODE:  return inflate_stream(s.slice);
-        case DCT_DECODE:    return dct_stream(s.slice);
-        case NO_FILTER:     return (StreamData) {
-                                .ptr = s.slice.ptr,
-                                .len = s.slice.len,
-                                .decompressed = false 
-                            };
+        case FILTER_KIND_FLATE:  return inflate_decode(s);
+        case FILTER_KIND_DCT:    return dct_decode(s);
+        case FILTER_KIND_CCITTFAX:
+        case FILTER_KIND_NONE:   return (DecodedStream) {
+                                     .data = {0},
+                                     .kind = STREAM_DATA_NONE,
+                                     .raw_stream = *s,
+                                 };
 
         default: PANIC("unhandled FilterKind: %u", filter);
     }
@@ -582,11 +586,9 @@ PDFObject parse_object(Parser *p) {
             Stream s = parse_stream(p);
             s.dict = dict;
 
-            FilterKind filter = NO_FILTER;
+            DecodedStream ds = parse_stream_data(&s);
+            return obj_from_decoded_stream(ds);
 
-            s.data = parse_stream_data(s);
-
-            return obj_from_stream(s);
         } else {
             return obj_from_dictionary(dict);
         }
