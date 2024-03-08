@@ -40,7 +40,11 @@ add_executable(papertrail ${SOURCES} src/main.c)
 # )
 
 find_library(MOZJPEG_LIB mozjpeg_sys HINTS ${MOZJPEG_OUT} REQUIRED)
-target_link_libraries(papertrail zlib m ${MOZJPEG_LIB})
+target_link_libraries(papertrail zlib ${MOZJPEG_LIB})
+
+if (UNIX)
+    target_link_libraries(papertrail m)
+endif()
 
 include_directories(${MOZJPEG_OUT}/build/include) # generated headers
 include_directories(${MOZJPEG_DIR}/include) # default headers
