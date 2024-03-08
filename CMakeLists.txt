@@ -32,12 +32,12 @@ execute_process(
 
 add_executable(papertrail ${SOURCES} src/main.c)
 
-add_custom_target(
-    TARGET papertrail
-    POST_BUILD
-    DEPENDS ${SOURCES} src/main.c # rebuild on change
-    COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
-)
+# add_custom_target(
+#     TARGET papertrail
+#     POST_BUILD
+#     DEPENDS ${SOURCES} src/main.c # rebuild on change
+#     COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
+# )
 
 find_library(MOZJPEG_LIB mozjpeg_sys HINTS ${MOZJPEG_OUT} REQUIRED)
 target_link_libraries(papertrail zlib m ${MOZJPEG_LIB})

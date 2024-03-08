@@ -1,8 +1,8 @@
 #include "pdf_parse.h"
 
-/* #include <jpeglib.h> */
+#include <jpeglib.h>
 
-int main() {
+int main(void) {
 
     /* PDFContent file = load_file("../dummy.pdf"); */
     PDFContent file = load_file("NUMPDE.pdf");
@@ -12,5 +12,6 @@ int main() {
 
     free_pdf(&pdf);
 
+    return 0;
 }
 

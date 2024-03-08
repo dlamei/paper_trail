@@ -1,7 +1,8 @@
 #include "decompress.h"
 
-#include "stb_image.h"
 
+#include <jpeglib.h>
+#include <setjmp.h>
 #include <zlib.h>
 
 #define CHUNK 16384
@@ -89,21 +90,23 @@ zerr:
     PANIC("ZERROR: %s", zret_to_str(ret));
 }
 
+jmp_buf jump_buffer;
+struct jpeg_error_mgr jerr;
+
+void jpeglib_error_exit(j_common_ptr cinfo) {
+    (*cinfo->err->output_message)(cinfo);
+    longjmp(jump_buffer, 1);
+}
+
+
 StreamData dct_stream(PDFSlice slice) {
-    
-    i32 ret = Z_ERRNO;
-    u8 *buff = slice.ptr;
-    u64 len = slice.len;
+    struct jpeg_decompress_struct info;
+    struct jpeg_error_mgr err;
 
-    int x, y, n_channels;
+    info.err = jpeg_std_error(&err);
+    jpeg_create_decompress(&info);
 
-    u8 *data = stbi_load_from_memory(buff, len, &x, &y, &n_channels, 0);
-
-    if (!data || stbi_failure_reason()) {
-        PANIC("Failed to load image: %s", stbi_failure_reason());
-	}
-
-    printf("x: %i, y: %i, n: %i\n", x, y, n_channels);
-
-    TODO;
+    u64 width = 0;
+    u64 height = 0;
+    u32 n_components = 0;
 }
