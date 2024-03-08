@@ -50,28 +50,37 @@ DecodedStream inflate_decode(Stream *stream) {
 	ret = inflateInit(&strm);
 	if (is_zerr(ret)) goto zerr;
 
-	u8 out_buf[CHUNK];
-
-	u8 *out = NULL;
-	u64 out_len = 0;
-
 	strm.next_in = src;
 	strm.total_in = strm.avail_in = len;
 
-	for (;;) {
-		strm.next_out = out_buf;
-		strm.avail_out = CHUNK;
-		ret = inflate(&strm, Z_NO_FLUSH);
-		if (is_zerr(ret)) goto zerr;
+    u64 avail_out = CHUNK;
+    u64 out_len = avail_out;
+    u8 *out = malloc(out_len * sizeof(u8));
+    u8 *next_out = out;
 
-		u32 rest = CHUNK - strm.avail_out;
+    for (;;) {
+        strm.next_out = next_out;
+        strm.avail_out = avail_out;
 
-		out_len += rest;
-		out = realloc(out, out_len * sizeof(u8));
-		memcpy(out + out_len - rest, out_buf, rest);
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (is_zerr(ret)) goto zerr;
 
-		if (strm.avail_out != 0) break;
-	}
+        if (strm.avail_out != 0) {
+            out_len += avail_out - strm.avail_out;
+            break;
+        }
+
+
+
+        u64 prev_len = out_len;
+        u64 add_size = out_len;
+
+        out_len += add_size;
+        out = realloc(out, out_len * sizeof(u8));
+
+        next_out = out + prev_len;
+        avail_out = add_size;
+    }
 
 	ASSERT_MSG(ret == Z_STREAM_END, "deflate did not reach the end of the stream: %s", zret_to_str(ret));
 

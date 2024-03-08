@@ -355,6 +355,12 @@ bool is_object(Parser *p) {
     return false;
 }
 
+/* TODO:
+/Root
+4
+0
+*/
+
 bool is_reference(Parser *p) {
     u64 pos = cursor_pos(p);
     bool res = false;
