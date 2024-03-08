@@ -25,26 +25,28 @@ typedef struct Parser {
     u64 size;
     u64 cursor;
     u8 curr_byte;
+
+    XRefEntry *ref_table;
 } Parser;
 
-u64 cursor_pos(Parser *p) {
+local inline u64 cursor_pos(Parser *p) {
     return p->cursor;
 }
 
-u8 *cursor_ptr(Parser *p) {
+local inline u8 *cursor_ptr(Parser *p) {
     return p->buffer + p->cursor;
 }
 
-bool reached_eof(Parser *p) {
+local inline bool reached_eof(Parser *p) {
     return p->cursor == p->size - 1;
 }
 
-void update_curr_byte(Parser *p) {
+local inline void update_curr_byte(Parser *p) {
     p->curr_byte = p->buffer[p->cursor];
 }
 
 // false if eof was reached
-bool next_byte(Parser *p) {
+local inline bool next_byte(Parser *p) {
     if (p->cursor + 1 < p->size) {
         p->cursor += 1;
         update_curr_byte(p);
@@ -54,7 +56,7 @@ bool next_byte(Parser *p) {
     return false;
 }
 
-bool prev_byte(Parser *p) {
+local inline bool prev_byte(Parser *p) {
     if (p->cursor - 1 < U64_MAX) {
         p->cursor -= 1;
         update_curr_byte(p);
@@ -65,7 +67,7 @@ bool prev_byte(Parser *p) {
 }
 
 // false if jumped over eof
-bool fwd_n_bytes(Parser *p, u64 n) {
+local inline bool fwd_n_bytes(Parser *p, u64 n) {
     if (p->cursor + n < p->size) {
         p->cursor += n;
         update_curr_byte(p);
@@ -94,7 +96,7 @@ local inline void goto_offset(Parser *p, u64 indx) {
     }
 }
 
-void goto_eof(Parser *p) {
+local inline void goto_eof(Parser *p) {
     goto_offset(p, p->size - 1);
 }
 
@@ -407,24 +409,70 @@ Reference parse_reference(Parser *p) {
     };
 }
 
-Stream parse_stream(Parser *p) {
+PDFObject parse_object(Parser *p);
+
+u64 get_stream_length(Parser *p, Dictionary *stream_dict) {
+    u64 len = 0;
+
+    DictionaryEntry *e = NULL;
+    if ((e = find_dict_entry(stream_dict, "Length")) != NULL) {
+        enum PDFObjectKind kind = e->object.kind;
+
+        if (kind == OBJ_INTEGER) {
+            i64 num = e->object.data.integer.value;
+            ASSERT(num > 0);
+            len = num;
+            
+        } else if (kind == OBJ_REFERENCE) {
+            Reference ref = e->object.data.reference;
+            XRefEntry ref_entry = p->ref_table[ref.object_num - 1];
+
+            u64 prev_pos = cursor_pos(p);
+            goto_offset(p, ref_entry.byte_offset);
+
+            u64 id = parse_uint(p);
+            ASSERT(id == ref.object_num);
+            skip_space(p);
+            u64 gen = parse_uint(p);
+            skip_space(p);
+            EXPECT_BYTES(p, "obj");
+            skip_space(p);
+            len = parse_uint(p);
+
+            goto_offset(p, prev_pos);
+        }
+    }
+
+    return len;
+}
+
+local inline Stream parse_stream(Parser *p, Dictionary *dict) {
     PRINT_PARSE_FN();
 
     EXPECT_BYTES(p, "stream");
     skip_space(p);
 
-    u64 start = cursor_pos(p);
-    ADVANCE_IF(p, !CURR_BYTES(p, "endstream"));
+    u64 stream_len = get_stream_length(p, dict);
 
+    u64 start = cursor_pos(p);
+
+    if (stream_len != 0) {
+        fwd_n_bytes(p, stream_len);
+        skip_space(p);
+    } else {
+        ADVANCE_IF(p, !CURR_BYTES(p, "endstream"));
+    }
 
     u64 end = cursor_pos(p);
+    u64 len = end - start;
 
     EXPECT_BYTES(p, "endstream");
 
     return (Stream) {
+        .dict = *dict,
         .slice = (PDFSlice) {
             .ptr = p->buffer + start,
-                .len = end - start,
+            .len = len,
         }
     };
 }
@@ -464,7 +512,6 @@ PDFObject parse_number(Parser *p) {
     }
 }
 
-PDFObject parse_object(Parser *p);
 
 // e.g [ 50 30 /Fred ]
 ObjectArray parse_array(Parser *p) {
@@ -589,7 +636,7 @@ PDFObject parse_object(Parser *p) {
         skip_space(p);
 
         if (CURR_BYTES(p, "stream")) {
-            Stream s = parse_stream(p);
+            Stream s = parse_stream(p, &dict);
             s.dict = dict;
 
             DecodedStream ds = parse_stream_data(&s);
@@ -681,6 +728,8 @@ XRefTable parse_xref_table(Parser *p) {
         XRefEntry e = parse_xref_entry(p);
         entries[i] = e;
     }
+
+    p->ref_table = entries;
 
     for (u64 i = 0; i < obj_count; i++) {
         u64 offset = entries[i].byte_offset;
