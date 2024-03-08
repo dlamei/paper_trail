@@ -27,12 +27,12 @@ typedef double f64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
 
-static_assert(sizeof(u8)  == sizeof(i8), "type check");
+static_assert(sizeof(u8) == sizeof(i8), "type check");
 static_assert(sizeof(u16) == sizeof(i16), "type check");
 static_assert(sizeof(u32) == sizeof(i32), "type check");
 static_assert(sizeof(u64) == sizeof(i64), "type check");
 
-static_assert(sizeof(u8)  == 1, "type check");
+static_assert(sizeof(u8) == 1, "type check");
 static_assert(sizeof(u16) == 2, "type check");
 static_assert(sizeof(u32) == 4, "type check");
 static_assert(sizeof(u64) == 8, "type check");
@@ -70,13 +70,13 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 #ifndef NULL
 #if defined(__cplusplus)
-    #if __cplusplus >= 201103L
-        #define NULL nullptr
-    #else
-        #define NULL 0
-    #endif
+#if __cplusplus >= 201103L
+#define NULL nullptr
 #else
-    #define NULL ((void *)0)
+#define NULL 0
+#endif
+#else
+#define NULL ((void *)0)
 #endif
 #endif
 
@@ -123,11 +123,11 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 #ifndef JOIN_MACROS
 #define JOIN_MACROS
-	#define JOIN2_IND(a, b) a##b
+#define JOIN2_IND(a, b) a##b
 
-	#define JOIN2(a, b)       JOIN2_IND(a, b)
-	#define JOIN3(a, b, c)    JOIN2(JOIN2(a, b), c)
-	#define JOIN4(a, b, c, d) JOIN2(JOIN2(JOIN2(a, b), c), d)
+#define JOIN2(a, b)       JOIN2_IND(a, b)
+#define JOIN3(a, b, c)    JOIN2(JOIN2(a, b), c)
+#define JOIN4(a, b, c, d) JOIN2(JOIN2(JOIN2(a, b), c), d)
 #endif
 
 // from [boost/current_function.hpp](https://www.boost.org/doc/libs/1_62_0/boost/current_function.hpp)
@@ -175,15 +175,15 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 
 
 #ifndef DEBUG_TRAP
-	#if defined(_MSC_VER)
-	 	#if _MSC_VER < 1300
-		#define DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
-		#else
-		#define DEBUG_TRAP() __debugbreak()
-		#endif
-	#else
-		#define DEBUG_TRAP() abort()
-	#endif
+#if defined(_MSC_VER)
+#if _MSC_VER < 1300
+#define DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
+#else
+#define DEBUG_TRAP() __debugbreak()
+#endif
+#else
+#define DEBUG_TRAP() abort()
+#endif
 #endif
 
 #ifndef ASSERT_MSG
@@ -218,7 +218,7 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 #endif
 
 static void gb_assert_handler(char const *prefix, char const *condition, char const *file, char const *function, i32 line, char const *msg, ...) {
-	fprintf(stderr, "%s::%s::(%d):: %s: ", file, function, line, prefix);
+	fprintf(stderr, "%s::%s::(%d)::\n%s:", file, function, line, prefix);
 	if (condition)
 		fprintf(stderr, "`%s` ", condition);
 	if (msg) {
