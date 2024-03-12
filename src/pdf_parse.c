@@ -26,7 +26,7 @@ typedef struct Parser {
     u64 cursor;
     u8 curr_byte;
 
-    XRefEntry *ref_table;
+    XRefTable xref_table;
 } Parser;
 
 local inline u64 cursor_pos(Parser *p) {
@@ -409,6 +409,7 @@ Reference parse_reference(Parser *p) {
     };
 }
 
+PDFObject parse_primitive(Parser *p);
 PDFObject parse_object(Parser *p);
 
 u64 get_stream_length(Parser *p, Dictionary *stream_dict) {
@@ -425,19 +426,14 @@ u64 get_stream_length(Parser *p, Dictionary *stream_dict) {
             
         } else if (kind == OBJ_REFERENCE) {
             Reference ref = e->object.data.reference;
-            XRefEntry ref_entry = p->ref_table[ref.object_num - 1];
+            XRefEntry ref_entry = p->xref_table.entries[ref.object_num - 1];
 
             u64 prev_pos = cursor_pos(p);
             goto_offset(p, ref_entry.byte_offset);
 
-            u64 id = parse_uint(p);
-            ASSERT(id == ref.object_num);
-            skip_space(p);
-            u64 gen = parse_uint(p);
-            skip_space(p);
-            EXPECT_BYTES(p, "obj");
-            skip_space(p);
-            len = parse_uint(p);
+            PDFObject obj = parse_object(p);
+            ASSERT(obj.kind == OBJ_INTEGER);
+            len = obj.data.integer.value;
 
             goto_offset(p, prev_pos);
         }
@@ -524,7 +520,7 @@ ObjectArray parse_array(Parser *p) {
         skip_space(p);
         if (p->curr_byte == ']') break;
 
-        PDFObject object = parse_object(p);
+        PDFObject object = parse_primitive(p);
         arrput(array.data, object);
         array.count += 1;
     }
@@ -547,7 +543,7 @@ Dictionary parse_dictionary(Parser *p) {
         if (p->curr_byte == '>') break;
 
         Name name = parse_name(p);
-        PDFObject object = parse_object(p);
+        PDFObject object = parse_primitive(p);
 
         DictionaryEntry entry = {
             .name = name,
@@ -605,7 +601,7 @@ local DecodedStream parse_stream_data(Stream *s) {
     }
 }
 
-PDFObject parse_object(Parser *p) {
+PDFObject parse_primitive(Parser *p) {
 
     PRINT_PARSE_FN();
     skip_space(p);
@@ -662,21 +658,36 @@ PDFObject parse_object(Parser *p) {
         return obj_from_boolean(boolean);
     } else if (CONSUME_BYTES(p, "null")) {
         return obj_from_pdf_null((PDFNull) { 0 });
-    } else if (CONSUME_BYTES(p, "obj")) {
+    /* } else if (CONSUME_BYTES(p, "obj")) { */
 
-        PDFObject obj = { 0 };
-        while (!CURR_BYTES(p, "endobj")) {
-            obj = parse_object(p);
-            skip_space(p);
-        }
+    /*     PDFObject obj = { 0 }; */
+    /*     while (!CURR_BYTES(p, "endobj")) { */
+    /*         obj = parse_primitive(p); */
+    /*         skip_space(p); */
+    /*     } */
 
-        return obj;
+    /*     return obj; */
     } else {
         println("failed at:");
         print_next_n_bytes(p, 30);
         println(" ");
         PANIC("unknown object type! (starts with %c / %u)", p->curr_byte, (u8)p->curr_byte);
     }
+}
+
+// [id] [gen] obj ... endobj
+PDFObject parse_object(Parser *p) {
+    u64 id = parse_uint(p);
+    skip_space(p);
+    u64 gen = parse_uint(p);
+    skip_space(p);
+
+    EXPECT_BYTES(p, "obj");
+    PDFObject object = parse_primitive(p);
+    skip_space(p);
+    EXPECT_BYTES(p, "endobj");
+
+    return object;
 }
 
 // entry 20 bytes long
@@ -705,7 +716,7 @@ XRefEntry parse_xref_entry(Parser *p) {
 
     return (XRefEntry) {
         .byte_offset = byte_offset,
-            .in_use = in_use,
+        .in_use = in_use,
     };
 }
 
@@ -722,34 +733,17 @@ XRefTable parse_xref_table(Parser *p) {
     parse_xref_entry(p);
 
     XRefEntry *entries = malloc(obj_count * sizeof(XRefEntry));
-    PDFObject *objects = malloc(obj_count * sizeof(PDFObject));
+    PDFObject *object_buffer = malloc(obj_count * sizeof(PDFObject));
 
     for (u64 i = 0; i < obj_count; i++) {
         XRefEntry e = parse_xref_entry(p);
         entries[i] = e;
     }
 
-    p->ref_table = entries;
-
-    for (u64 i = 0; i < obj_count; i++) {
-        u64 offset = entries[i].byte_offset;
-        goto_offset(p, offset);
-
-        u64 id = parse_uint(p);
-        ASSERT(id - 1 == i);
-        skip_space(p);
-        u64 gen = parse_uint(p);
-        skip_space(p);
-
-        PDFObject obj = parse_object(p);
-        objects[i] = obj;
-    }
-
     return (XRefTable) {
         .obj_id = obj_id,
             .obj_count = obj_count,
             .entries = entries,
-            .objects = objects,
     };
 
 }
@@ -794,11 +788,6 @@ PDFTrailer parse_trailer(Parser *p) {
     PANIC("Could not find trailer, reached start of file");
 }
 
-#define COUNT_N_PARSED_BYTES(parse_fn) \
-    u64 __start = p.curr_byte_indx; \
-    parse_fn; \
-    p.parsed_pdf.n_bytes_parsed += p.curr_byte_indx - __start;
-
 PDF parse_pdf(PDFContent *content) {
     PDF pdf = {0};
 
@@ -812,17 +801,23 @@ PDF parse_pdf(PDFContent *content) {
 
     goto_offset(p, trailer.xref_table_offset);
     XRefTable table = parse_xref_table(p);
+    p->xref_table = table;
 
     pdf.xref_table = table;
     pdf.trailer = trailer;
+    pdf.object_buffer = malloc(pdf.xref_table.obj_count * sizeof(PDFObject));
+
+    for (u32 i = 0; i < table.obj_count; i++) {
+        XRefEntry xref = table.entries[i];
+        goto_offset(p, xref.byte_offset);
+        PDFObject obj = parse_object(p);
+        pdf.object_buffer[i] = obj;
+    }
 
     return pdf;
 };
 
 PDFContent load_file(const char *path) {
-    /* u64 _size = 0; */
-    /* u8 *_buffer = NULL; */
-
     u8 *source = NULL;
     u64 bufsize = 0;
     // SET_BIN_MODE?

@@ -2,17 +2,6 @@
 
 #include <ctype.h>
 
-
-// TODO: inline reference?
-PDFObject *derefrence_object(PDFObject *obj, XRefTable table) {
-    if (obj->kind == OBJ_REFERENCE) {
-        Reference ref = obj->data.reference;
-        return derefrence_object(&table.objects[ref.object_num - 1], table);
-    } else {
-        return obj;
-    }
-}
-
 bool cmp_name_str(Name n, const char *str) {
     u32 len = strlen(str);
     if (n.slice.len != len) return false;
@@ -128,8 +117,11 @@ void print_dictionary(Dictionary dict) {
     printf("<< ");
 
     for (u64 i = 0; i < dict.count; i++) {
+        printf("(");
         print_name(dict.entries[i].name);
+        printf(", ");
         print_object(dict.entries[i].object);
+        printf(") ");
     }
 
     printf(">>");
@@ -138,6 +130,19 @@ void print_dictionary(Dictionary dict) {
 void print_stream(Stream s) {
     printf("{ stream");
     print_dictionary(s.dict);
+    printf(" }");
+}
+
+void print_decoded_stream(DecodedStream s) {
+    printf("{ decoded_stream");
+
+    switch (s.kind) {
+    case STREAM_DATA_BUFFER: printf("Buffer: %lu", s.data.buffer.size); break;
+    case STREAM_DATA_IMAGE: printf("image: %u x %u", s.data.image.width, s.data.image.height); break;
+    case STREAM_DATA_NONE: printf("raw buffer"); break;
+    default: PANIC("unhandled StreamDataKind: found: %i", s.kind); break;
+    }
+
     printf(" }");
 }
 
@@ -171,6 +176,7 @@ void print_object(PDFObject o) {
         case OBJ_ARRAY          : print_array(o.data.array); break;
         case OBJ_DICTIONARY     : print_dictionary(o.data.dictionary); break;
         case OBJ_STREAM         : print_stream(o.data.stream); break;
+        case OBJ_DECODED_STREAM : print_decoded_stream(o.data.decoded_stream); break;
         default: PANIC("unhandled object kind: %s", obj_kind_to_str(o.kind));
     }
 }
@@ -187,15 +193,17 @@ void print_xref_table(XRefTable t) {
         println(" ");
     } 
 
-    for (u64 i = 0; i < t.obj_count; i++) {
-        printf("\nobj: %lu\n", i + 1);
-        print_object(t.objects[i]);
-        printf("\nendobj\n");
-    } 
 }
 
 void print_pdf(PDF pdf) {
     print_xref_table(pdf.xref_table);
+
+    // object buffer
+    for (u64 i = 0; i < pdf.xref_table.obj_count; i++) {
+        printf("\nobj: %lu\n", i + 1);
+        print_object(pdf.object_buffer[i]);
+        printf("\nendobj\n");
+    } 
 }
 
 local inline void free_buffer(Buffer b) {
@@ -261,14 +269,8 @@ void free_object(PDFObject *obj) {
 
 local inline void free_xref_table(XRefTable *t) {
     ASSERT(t->entries);
-    ASSERT(t->objects);
-
-    for (u64 i = 0; i < t->obj_count; i++) {
-        free_object(&t->objects[i]);
-    }
     
     free(t->entries);
-    free(t->objects);
 
     *t = (XRefTable){0};
 }
@@ -282,5 +284,6 @@ local inline void free_pdf_content(PDFContent *c) {
 void free_pdf(PDF *pdf) {
     free_dictionary(pdf->trailer.dict);
     free_xref_table(&pdf->xref_table);
+    free(pdf->object_buffer);
     free_pdf_content(&pdf->content);
 }

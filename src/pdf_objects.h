@@ -151,16 +151,12 @@ typedef struct DictionaryEntry {
 typedef struct XRefEntry {
     u64 byte_offset;
     bool in_use;
-    // u32 generation
 } XRefEntry;
 
 //TODO: objects not in use
 typedef struct XRefTable {
     u32 obj_id;
     u32 obj_count;
-    // parsed obj at byte_offset
-    PDFObject *objects;
-    // byte_offset in_use
     XRefEntry *entries;
 } XRefTable;
 
@@ -175,6 +171,7 @@ typedef struct PDF {
     //PDFSlice header;
     PDFTrailer trailer;
     XRefTable xref_table;
+    PDFObject *object_buffer;
 } PDF;
 
 #define X(TYP, VAR, IDNT) PDFObject obj_from_##IDNT(TYP IDNT);
