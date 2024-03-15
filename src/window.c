@@ -721,8 +721,6 @@ void run() {
 
         vkResetCommandBuffer(command_buffer, 0);
         
-        println("%u", swapchain_image_index);
-
 
         VkCommandBufferBeginInfo command_buffer_begin_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -803,12 +801,11 @@ void run() {
     }
 
 
-
-
-    
+    vkDeviceWaitIdle(vc.device);
 
     vkDestroySemaphore(vc.device, image_available_semaphore, NULL);
     vkDestroySemaphore(vc.device, render_finished_semaphore, NULL);
+    vkDestroyFence(vc.device, in_flight_fence, NULL);
     vkDestroyCommandPool(vc.device, command_pool, NULL);
 
     for (u32 i = 0; i < vc.swapchain_image_count; i++) {

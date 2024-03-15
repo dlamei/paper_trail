@@ -3,11 +3,13 @@ cmake_minimum_required(VERSION 3.15)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -g")
 # -Wall -Wextra -Wundef -Wcast-align -Wcast-qual -Wswitch-enum -g")
 
+
 project(papertrail)
 
 add_subdirectory(vendor/zlib)
 include_directories(vendor/zlib)
 
+set(GLFW_BUILD_WAYLAND OFF)
 add_subdirectory(vendor/glfw)
 
 find_package(Vulkan REQUIRED FATAL_ERROR)
@@ -34,7 +36,7 @@ set(SOURCES
 )
 
 execute_process(
-    COMMAND cargo build --release --offline --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
+    COMMAND cargo build --release --target-dir ${MOZJPEG_OUT_ROOT} --manifest-path ${MOZJPEG_DIR}/Cargo.toml
     )
 
 add_executable(papertrail ${SOURCES} src/main.c)
