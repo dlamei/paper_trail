@@ -3,7 +3,7 @@
 #include "utils.h"
 
 
-typedef struct Buffer {
+typedef struct SPIRVBuffer {
     u8 *data;
     u64 size;
 } Buffer;

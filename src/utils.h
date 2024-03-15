@@ -130,6 +130,18 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 #define JOIN4(a, b, c, d) JOIN2(JOIN2(JOIN2(a, b), c), d)
 #endif
 
+#ifndef MAX
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#endif
+
+#ifndef MIN
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#endif
+
+#ifndef CLAMP
+#define CLAMP(x, upper, lower) (MIN(upper, MAX(x, lower)))
+#endif
+
 // from [boost/current_function.hpp](https://www.boost.org/doc/libs/1_62_0/boost/current_function.hpp)
 
 #if defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__)
