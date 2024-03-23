@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.15)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -g")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -g3")
 # -Wall -Wextra -Wundef -Wcast-align -Wcast-qual -Wswitch-enum -g")
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
 
-project(papertrail)
+project(papertrail C)
+
 
 add_subdirectory(vendor/zlib)
 include_directories(vendor/zlib)
