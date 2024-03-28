@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 
 #define ASSERT_NEXT_BYTE(parser) \
     ASSERT_MSG(next_byte(parser), "next_byte called at eof")
@@ -789,6 +790,8 @@ PDFTrailer parse_trailer(Parser *p) {
 }
 
 PDF parse_pdf(PDFContent *content) {
+    f64 start = clock();
+
     PDF pdf = {0};
 
     Parser parser = make_parser(content->data, content->size);
@@ -813,6 +816,9 @@ PDF parse_pdf(PDFContent *content) {
         PDFObject obj = parse_object(p);
         pdf.object_buffer[i] = obj;
     }
+
+    f64 parse_time = clock() - start;
+    printf("parsed in: %f s", parse_time / CLOCKS_PER_SEC);
 
     return pdf;
 };

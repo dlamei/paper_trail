@@ -330,7 +330,7 @@ VkContext vk_context_init() {
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     GLFWwindow *window = glfwCreateWindow(1000, 800, "Papertrail", NULL, NULL);
 
@@ -404,6 +404,9 @@ VkContext vk_context_init() {
     VkPhysicalDevice physical_device = physical_devices[0];
     free(physical_devices);
 
+    VkPhysicalDeviceProperties physical_device_properties;
+    vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
+    println("physical device: %s", physical_device_properties.deviceName);
 
 
     /// QUEUE FAMILIES ///
