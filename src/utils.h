@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include "stb_ds.h"
+#include <ext/stb_ds.h>
 
 // taken from [https://github.com/gingerBill/gb]
 
@@ -84,7 +84,7 @@ static_assert(sizeof(usize) == sizeof(isize), "type check");
 #define local static
 
 #ifndef COUNT_OF
-#define COUNT_OF(x) ((sizeof(x)/sizeof(0[x])) / ((size_t)(!(sizeof(x) % sizeof(0[x])))))
+#define COUNT_OF(x) ((sizeof(x)/sizeof(x[0])) / ((size_t)(!(sizeof(x) % sizeof(x[0])))))
 #endif
 
 

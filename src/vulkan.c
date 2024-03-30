@@ -1,9 +1,10 @@
 #include "vulkan.h"
 #include "window.h"
-#include "stb_ds.h"
 
-#include <vulkan/vulkan.h>
 #include <time.h>
+#include <ext/stb_ds.h>
+#include <vulkan/vulkan.h>
+#include <ext/vk_mem_alloc.h>
 
 #define VK_CHECK(result) \
     ASSERT((result) == VK_SUCCESS)
@@ -17,6 +18,27 @@ typedef struct SPIRVBinary {
 	u8 *data;
 	u64 size;
 } SPIRVBinary;
+
+#define VK_FORMAT_FVEC2 VK_FORMAT_R32G32_SFLOAT
+#define VK_FORMAT_FVEC3 VK_FORMAT_R32G32B32_SFLOAT
+
+typedef struct fvec2 {
+    f32 x;
+    f32 y;
+} fvec2;
+
+typedef struct fvec3 {
+    f32 x;
+    f32 y;
+    f32 z;
+} fvec3;
+
+typedef struct Vertex {
+    fvec2 pos;
+    fvec3 color;
+} Vertex;
+
+static_assert(sizeof(Vertex) == 5 * sizeof(f32), "packed vertex");
 
 typedef struct SwapchainSupportDetails {
 	VkSurfaceCapabilitiesKHR surface_capabilities;
@@ -42,12 +64,11 @@ typedef struct Swapchain {
 } Swapchain;
 
 typedef struct VkContext {
-	//PapertrailWindow *p_window;
-
 	VkInstance instance;
 	VkSurfaceKHR surface;
 	VkPhysicalDevice physical_device;
 	VkDevice device;
+    VmaAllocator allocator;
 	VkQueue graphics_queue;
 	VkQueue present_queue;
 	u32 present_queue_index;
@@ -71,6 +92,8 @@ typedef struct PapertrailRenderpass {
 
 	VkShaderModule vertex_module;
 	VkShaderModule fragment_module;
+
+    VkBuffer buffer;
 } PapertrailRenderpass;
 
 // callback functions and data for window events (e.g. resizing)
@@ -78,6 +101,33 @@ typedef struct PapertrailWindowCallbackFn {
 	VkContext *p_context;
 	PapertrailRenderpass *p_renderpass;
 } PapertrailWindowCallbackFn;
+
+const Vertex VERTICES[] = {
+        {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
+
+const VkVertexInputBindingDescription vertex_binding_description = {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+};
+
+const VkVertexInputAttributeDescription vertex_attribute_descriptions[] = {
+        {
+            .binding = 0,
+            .location = 0,
+            .format = VK_FORMAT_FVEC2,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .binding = 0,
+            .location = 1,
+            .format = VK_FORMAT_FVEC3,
+            .offset = offsetof(Vertex, color)
+        }
+};
 
 
 /// WINDOW ///
@@ -365,7 +415,7 @@ VkContext vk_context_init(PapertrailWindow *window) {
 			.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 			.pEngineName = "PaperEngine",
 			.engineVersion = VK_MAKE_VERSION(1, 0, 0),
-			.apiVersion = VK_API_VERSION_1_0,
+			.apiVersion = VK_API_VERSION_1_2,
 	};
 
 	const char *required_extensions[MAX_PROPERTIES_LEN];
@@ -456,7 +506,7 @@ VkContext vk_context_init(PapertrailWindow *window) {
 
 	ASSERT_MSG(found_graphics_queue && found_present_support, "could not find suitable graphics & present queue");
 
-	float queue_priority = 1.0;
+	float queue_priority = 1.0f;
 	u32 queue_create_info_count = 2;
 	if (graphics_queue_index == present_queue_index) queue_create_info_count = 1;
 	VkDeviceQueueCreateInfo queue_create_infos[2] = {
@@ -498,11 +548,20 @@ VkContext vk_context_init(PapertrailWindow *window) {
 	vkGetDeviceQueue(device, graphics_queue_index, 0, &graphics_queue);
 	vkGetDeviceQueue(device, present_queue_index, 0, &present_queue);
 
+    VmaAllocatorCreateInfo allocator_create_info = {
+            .physicalDevice = physical_device,
+            .device = device,
+            .instance = instance,
+    };
+    VmaAllocator allocator;
+    vmaCreateAllocator(&allocator_create_info, &allocator);
+
 	return (VkContext) {
         .instance = instance,
         .surface = surface,
         .physical_device = physical_device,
         .device = device,
+        .allocator = allocator,
         .graphics_queue = graphics_queue,
         .graphics_queue_index = graphics_queue_index,
         .present_queue = present_queue,
@@ -511,7 +570,7 @@ VkContext vk_context_init(PapertrailWindow *window) {
 }
 
 void vk_context_destroy(VkContext *c) {
-	/* vulkan */
+    vmaDestroyAllocator(c->allocator);
 	vkDestroySurfaceKHR(c->instance, c->surface, NULL);
 	vkDestroyDevice(c->device, NULL);
 	vkDestroyInstance(c->instance, NULL);
@@ -556,10 +615,10 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 
 	VkPipelineVertexInputStateCreateInfo pipeline_vertex_input_create_info = {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = 0,
-			.pVertexBindingDescriptions = NULL,
-			.vertexAttributeDescriptionCount = 0,
-			.pVertexAttributeDescriptions = NULL,
+			.vertexBindingDescriptionCount = 1,
+			.pVertexBindingDescriptions = &vertex_binding_description,
+			.vertexAttributeDescriptionCount = COUNT_OF(vertex_attribute_descriptions),
+			.pVertexAttributeDescriptions = vertex_attribute_descriptions,
 	};
 
 	VkPipelineInputAssemblyStateCreateInfo pipeline_input_assembly_create_info = {
@@ -874,6 +933,10 @@ void ptrail_render_frame(PapertrailWindow *window, const VkContext *c, Papertrai
 			.extent = rp->swapchain.extent,
 	};
 	vkCmdSetScissor(command_buffer, 0, 1, &viewport_scissor);
+
+    VkDeviceSize offset = {0};
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &rp->buffer, &offset);
+
 	vkCmdDraw(command_buffer, 3, 1, 0, 0);
 
 	vkCmdEndRenderPass(command_buffer);
@@ -951,6 +1014,34 @@ void run() {
 	ptrail_window_set_refresh_callback(window, window_refresh_callback);
 	ptrail_window_set_client_state(window, &callback_ptrs);
 
+    VkBufferCreateInfo buffer_create_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .size = sizeof(VERTICES),
+    };
+    VmaAllocationCreateInfo allocation_create_info = {
+            .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    };
+
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    VK_CHECK(vmaCreateBuffer(
+            c.allocator,
+            &buffer_create_info,
+            &allocation_create_info,
+            &buffer,
+            &allocation,
+            NULL)
+    );
+
+    void *buffer_data;
+    vmaMapMemory(c.allocator, allocation, &buffer_data);
+    memcpy(buffer_data, VERTICES, sizeof(VERTICES));
+    vmaUnmapMemory(c.allocator, allocation);
+
+    rp.buffer = buffer;
+
 	/// RENDER LOOP ///
 	while (ptrail_window_is_open(window)) {
 		wait_if_minimized(window);
@@ -962,6 +1053,7 @@ void run() {
 	/// CLEANUP ///
 	vkDeviceWaitIdle(c.device);
 
+    vmaDestroyBuffer(c.allocator, buffer, allocation);
 	ptrail_renderpass_destroy(c.device, &rp);
 	vk_context_destroy(&c);
 
