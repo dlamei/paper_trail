@@ -1,6 +1,6 @@
 #include "pdf_parse.h"
 
-#include "window.h"
+#include "vulkan.h"
 
 #ifdef WIN32
 #define MAIN WinMain

@@ -41,6 +41,8 @@ set(SOURCES
 
     src/window.h
     src/window.c
+    src/vulkan.h
+    src/vulkan.c
 
     src/stb_ds.h
     src/stb_image.h
