@@ -2,18 +2,24 @@
 
 #include "window.h"
 
+#ifdef WIN32
+#define MAIN WinMain
+#else
+#define MAIN main
+#endif
+
 int main(void) {
 
-    //run();
+	run();
 
-    //PDFContent file = load_file("../dummy.pdf");
-    PDFContent file = load_file("../NUMPDE.pdf");
-    PDF pdf = parse_pdf(&file);
+	//PDFContent file = load_file("../dummy.pdf");
+	//PDFContent file = load_file("../NUMPDE.pdf");
+	//PDF pdf = parse_pdf(&file);
 
-    //print_pdf(pdf);
+	//print_pdf(pdf);
 
-    free_pdf(&pdf);
+	//free_pdf(&pdf);
 
-    return 0;
+	return 0;
 }
 

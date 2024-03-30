@@ -53,34 +53,34 @@ DecodedStream inflate_decode(Stream *stream) {
 	strm.next_in = src;
 	strm.total_in = strm.avail_in = len;
 
-    u64 avail_out = CHUNK;
-    u64 out_len = avail_out;
-    u8 *out = malloc(out_len * sizeof(u8));
-    u8 *next_out = out;
+	u64 avail_out = CHUNK;
+	u64 out_len = avail_out;
+	u8 *out = malloc(out_len * sizeof(u8));
+	u8 *next_out = out;
 
-    for (;;) {
-        strm.next_out = next_out;
-        strm.avail_out = avail_out;
+	for (;;) {
+		strm.next_out = next_out;
+		strm.avail_out = avail_out;
 
-        ret = inflate(&strm, Z_NO_FLUSH);
-        if (is_zerr(ret)) goto zerr;
+		ret = inflate(&strm, Z_NO_FLUSH);
+		if (is_zerr(ret)) goto zerr;
 
-        if (strm.avail_out != 0) {
-            out_len += avail_out - strm.avail_out;
-            break;
-        }
+		if (strm.avail_out != 0) {
+			out_len += avail_out - strm.avail_out;
+			break;
+		}
 
 
 
-        u64 prev_len = out_len;
-        u64 add_size = out_len;
+		u64 prev_len = out_len;
+		u64 add_size = out_len;
 
-        out_len += add_size;
-        out = realloc(out, out_len * sizeof(u8));
+		out_len += add_size;
+		out = realloc(out, out_len * sizeof(u8));
 
-        next_out = out + prev_len;
-        avail_out = add_size;
-    }
+		next_out = out + prev_len;
+		avail_out = add_size;
+	}
 
 	ASSERT_MSG(ret == Z_STREAM_END, "deflate did not reach the end of the stream: %s", zret_to_str(ret));
 
@@ -88,16 +88,16 @@ DecodedStream inflate_decode(Stream *stream) {
 	ASSERT(!is_zerr(ret));
 
 
-    Buffer buffer = {
-        .data = out,
-        .size = out_len,
-    };
+	Buffer buffer = {
+		.data = out,
+		.size = out_len,
+	};
 
-    return (DecodedStream) {
-        .data = (union StreamData) { .buffer = buffer },
-        .kind = STREAM_DATA_BUFFER,
-        .raw_stream = *stream,
-    };
+	return (DecodedStream) {
+		.data = (union StreamData){ .buffer = buffer },
+			.kind = STREAM_DATA_BUFFER,
+			.raw_stream = *stream,
+	};
 
 zerr:
 	PANIC("ZERROR: %s", zret_to_str(ret));
@@ -105,49 +105,49 @@ zerr:
 
 
 DecodedStream dct_decode(Stream *stream) {
-    u32 width = 0;
-    u32 height = 0;
-    u64 size = 0;
-    u32 n_channels = 0;
-    u8 *data = NULL;
+	u32 width = 0;
+	u32 height = 0;
+	u64 size = 0;
+	u32 n_channels = 0;
+	u8 *data = NULL;
 
-    struct jpeg_decompress_struct info;
-    struct jpeg_error_mgr err;
+	struct jpeg_decompress_struct info;
+	struct jpeg_error_mgr err;
 
-    info.err = jpeg_std_error(&err);
-    jpeg_create_decompress(&info);
+	info.err = jpeg_std_error(&err);
+	jpeg_create_decompress(&info);
 
-    jpeg_mem_src(&info, stream->slice.ptr, stream->slice.len);
-    (void)jpeg_read_header(&info, true);
-    (void)jpeg_start_decompress(&info);
+	jpeg_mem_src(&info, stream->slice.ptr, stream->slice.len);
+	(void)jpeg_read_header(&info, true);
+	(void)jpeg_start_decompress(&info);
 
-    width = info.output_width;
-    height = info.output_height;
-    n_channels = info.num_components;
+	width = info.output_width;
+	height = info.output_height;
+	n_channels = info.num_components;
 
-    size = width * height * n_channels;
-    u32 row_stride = width * n_channels;
-    data = malloc(size * sizeof(u8));
+	size = (u64)width * height * n_channels;
+	u32 row_stride = width * n_channels;
+	data = malloc(size * sizeof(u8));
 
-    u8 *out_scanlines_ptr[1] = {0}; // for now only 1 scanline at the time
-    while (info.output_scanline < info.output_height) {
-        out_scanlines_ptr[0] = &data[row_stride * info.output_scanline];
-        (void) jpeg_read_scanlines(&info, out_scanlines_ptr, 1);
-    }
+	u8 *out_scanlines_ptr[1] = { 0 }; // for now only 1 scanline at the time
+	while (info.output_scanline < info.output_height) {
+		out_scanlines_ptr[0] = &data[row_stride * info.output_scanline];
+		(void)jpeg_read_scanlines(&info, out_scanlines_ptr, 1);
+	}
 
-    jpeg_finish_decompress(&info);
-    jpeg_destroy_decompress(&info);
+	jpeg_finish_decompress(&info);
+	jpeg_destroy_decompress(&info);
 
-    RawImage image = {
-        .data = data,
-        .width = width,
-        .height = height,
-        .n_channels = n_channels,
-    };
+	RawImage image = {
+		.data = data,
+		.width = width,
+		.height = height,
+		.n_channels = n_channels,
+	};
 
-    return (DecodedStream) {
-        .data = (union StreamData) { .image = image },
-        .kind = STREAM_DATA_IMAGE,
-        .raw_stream = *stream,
-    };
+	return (DecodedStream) {
+		.data = (union StreamData){ .image = image },
+			.kind = STREAM_DATA_IMAGE,
+			.raw_stream = *stream,
+	};
 }
