@@ -40,6 +40,18 @@ typedef struct Vertex {
 
 static_assert(sizeof(Vertex) == 5 * sizeof(f32), "packed vertex");
 
+typedef struct BufferAllocationCreateInfo {
+    VkBufferUsageFlags buffer_usage;
+    VmaMemoryUsage memory_usage;
+    VkDeviceSize size;
+    VmaAllocationCreateFlags allocation_flag;
+} BufferAllocationCreateInfo;
+
+typedef struct BufferAllocation {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+} BufferAllocation;
+
 typedef struct SwapchainSupportDetails {
 	VkSurfaceCapabilitiesKHR surface_capabilities;
 	VkSurfaceFormatKHR surface_format;
@@ -77,9 +89,8 @@ typedef struct VkContext {
 
 #define MAX_FRAMES_IN_FLIGHT 2
 typedef struct PapertrailRenderpass {
-	VkPipelineLayout pipeline_layout;
 	VkPipeline pipeline;
-	SwapchainCreateInfo swapchain_create_info;
+	SwapchainCreateInfo swapchain_create_info; // for rebuilding the swapchain
 	Swapchain swapchain;
 	VkRenderPass renderpass;
 	VkCommandPool command_pool;
@@ -88,25 +99,34 @@ typedef struct PapertrailRenderpass {
 	VkSemaphore semaphore_image_available[MAX_FRAMES_IN_FLIGHT];
 	VkSemaphore semaphore_render_finished[MAX_FRAMES_IN_FLIGHT];
 	VkFence fence_in_flight[MAX_FRAMES_IN_FLIGHT];
-	u32 current_frame_index;
 
-	VkShaderModule vertex_module;
-	VkShaderModule fragment_module;
-
-    VkBuffer buffer;
+    u32 current_frame_index;
+    u32 current_swapchain_image_index;
 } PapertrailRenderpass;
+
+typedef struct PapertrailRenderData {
+    BufferAllocation vertex_buffer;
+    BufferAllocation index_buffer;
+} PapertrailRenderData;
 
 // callback functions and data for window events (e.g. resizing)
 typedef struct PapertrailWindowCallbackFn {
 	VkContext *p_context;
 	PapertrailRenderpass *p_renderpass;
+    PapertrailRenderData *p_render_data;
 } PapertrailWindowCallbackFn;
 
 const Vertex VERTICES[] = {
-        {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-        {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
 };
+
+const u16 INDICES[] = {
+        0, 1, 2, 2, 3, 0
+};
+
 
 const VkVertexInputBindingDescription vertex_binding_description = {
         .binding = 0,
@@ -168,7 +188,8 @@ SPIRVBinary load_spirv_binary(const char *path) {
 	u64 bufsize = 0;
 
 	//TODO: set bin mode?
-	FILE *fp = fopen(path, "rb");
+	FILE *fp;
+    fopen_s(&fp, path, "rb");
 	ASSERT_MSG(fp, "could not open file: %s", path);
 
 	if (fseek(fp, 0L, SEEK_END) == 0) {
@@ -206,9 +227,56 @@ VkShaderModule vk_create_shader_module(SPIRVBinary spv, const VkContext *vc) {
 }
 
 
+// BUFFERS //
+
+local inline VkResult buffer_allocation_create(VmaAllocator allocator,
+                                  const BufferAllocationCreateInfo *create_info,
+                                  BufferAllocation *buffer_allocation)
+ {
+    VkBufferCreateInfo buffer_create_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .usage = create_info->buffer_usage,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .size = create_info->size,
+    };
+
+    VmaAllocationCreateInfo allocation_create_info = {
+        .usage = create_info->memory_usage,
+        .flags = create_info->allocation_flag,
+    };
+
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    VK_RET_ERR(vmaCreateBuffer(
+            allocator,
+            &buffer_create_info,
+            &allocation_create_info,
+            &buffer,
+            &allocation,
+            NULL)
+    );
+
+    *buffer_allocation = (BufferAllocation) {
+        .buffer = buffer,
+        .allocation = allocation,
+    };
+
+    return VK_SUCCESS;
+}
+
+local inline void buffer_allocation_destroy(BufferAllocation *buff, VmaAllocator allocator) {
+    vmaDestroyBuffer(allocator, buff->buffer, buff->allocation);
+}
+
+local inline void ptrail_render_data_destroy(PapertrailRenderData *data, const VkContext *c) {
+    buffer_allocation_destroy(&data->vertex_buffer, c->allocator);
+    buffer_allocation_destroy(&data->index_buffer, c->allocator);
+}
+
+
 /// SWAPCHAIN ///
 
-SwapchainSupportDetails vk_query_swapchain_support(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+local SwapchainSupportDetails query_swapchain_support(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
 	VkSurfaceCapabilitiesKHR surface_capabilities;
 	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &surface_capabilities);
 
@@ -222,7 +290,11 @@ SwapchainSupportDetails vk_query_swapchain_support(VkPhysicalDevice physical_dev
 	vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &surface_present_mode_count, NULL);
 	ASSERT(surface_present_mode_count != 0 && surface_present_mode_count <= MAX_PROPERTIES_LEN);
 	VkPresentModeKHR surface_present_modes[MAX_PROPERTIES_LEN];
-	vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &surface_present_mode_count, surface_present_modes);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(
+            physical_device,
+            surface,
+            &surface_present_mode_count,
+            surface_present_modes);
 
 	VkSurfaceFormatKHR surface_format = surface_formats[0];
 	for (u32 i = 0; i < surface_format_count; i++) {
@@ -248,7 +320,7 @@ SwapchainSupportDetails vk_query_swapchain_support(VkPhysicalDevice physical_dev
 	};
 }
 
-void vk_swapchain_destroy(VkDevice device, Swapchain *s) {
+local void swapchain_destroy(VkDevice device, Swapchain *s) {
 	for (u32 i = 0; i < s->image_count; i++) {
 		vkDestroyFramebuffer(device, s->framebuffers[i], NULL);
 	}
@@ -258,7 +330,7 @@ void vk_swapchain_destroy(VkDevice device, Swapchain *s) {
 	vkDestroySwapchainKHR(device, s->vk_swapchain, NULL);
 }
 
-VkResult vk_swapchain_init(
+local VkResult swapchain_init(
 	VkDevice device,
 	VkPhysicalDevice physical_device,
 	VkSurfaceKHR surface,
@@ -267,7 +339,7 @@ VkResult vk_swapchain_init(
 	Swapchain *out_swapchain)
 {
 	VkSwapchainKHR swapchain;
-	SwapchainSupportDetails swapchain_support = vk_query_swapchain_support(physical_device, surface);
+	SwapchainSupportDetails swapchain_support = query_swapchain_support(physical_device, surface);
 	VkSurfaceCapabilitiesKHR capabilities = swapchain_support.surface_capabilities;
 
 	u32 min_image_count = capabilities.minImageCount + 1;
@@ -372,7 +444,7 @@ VkResult vk_swapchain_init(
 	return VK_SUCCESS;
 }
 
-VkResult vk_swapchain_rebuild(
+local VkResult swapchain_rebuild(
 	VkDevice device,
 	VkPhysicalDevice physical_device,
 	VkSurfaceKHR surface,
@@ -381,8 +453,8 @@ VkResult vk_swapchain_rebuild(
 	Swapchain *swapchain)
 {
 	vkDeviceWaitIdle(device);
-	vk_swapchain_destroy(device, swapchain);
-	VK_RET_ERR(vk_swapchain_init(
+	swapchain_destroy(device, swapchain);
+	VK_RET_ERR(swapchain_init(
 		device,
 		physical_device,
 		surface,
@@ -394,14 +466,62 @@ VkResult vk_swapchain_rebuild(
 	return VK_SUCCESS;
 }
 
-void framebuffer_resized_callback(PapertrailWindow *window, i32 width, i32 height) {
+local void framebuffer_resized_callback(PapertrailWindow *window, i32 width, i32 height) {
 	PapertrailWindowCallbackFn *ptrs = ptrail_window_get_client_state(window);
 	VkContext *c = ptrs->p_context;
 	PapertrailRenderpass *rp = ptrs->p_renderpass;
 
-	rp->swapchain_create_info.image_extent = get_vk_window_size(window);
-	VK_CHECK(vk_swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
+	rp->swapchain_create_info.image_extent = (VkExtent2D){
+            .width = (u32)width,
+            .height = (u32)height,
+    };
+	VK_CHECK(swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
 		&rp->swapchain_create_info, &rp->swapchain));
+}
+
+
+VkPhysicalDevice vk_pick_physical_device(
+        const char **req_extensions,
+        u32 extension_count,
+        VkInstance instance
+        ){
+    u32 device_count = 0;
+    VkPhysicalDevice devices[MAX_PROPERTIES_LEN];
+    vkEnumeratePhysicalDevices(instance, &device_count, NULL);
+    ASSERT(device_count <= MAX_PROPERTIES_LEN);
+    vkEnumeratePhysicalDevices(instance, &device_count, devices);
+
+    for (u32 device_indx = 0; device_indx < device_count; device_indx++) {
+        VkPhysicalDevice physical_device = devices[device_indx];
+
+        u32 available_extension_count = 0;
+        vkEnumerateDeviceExtensionProperties(physical_device, NULL, &available_extension_count, NULL);
+        VkExtensionProperties *available_extensions =
+                malloc(available_extension_count * sizeof(VkExtensionProperties));
+        vkEnumerateDeviceExtensionProperties(physical_device, NULL, &available_extension_count, available_extensions);
+
+        bool all_ext_supported = true;
+        for (u32 i = 0; i < extension_count; i++) {
+            const char *req_ext = req_extensions[i];
+
+            bool ext_supported = false;
+            for (u32 j = 0; j < available_extension_count; j++) {
+                VkExtensionProperties avail_ext = available_extensions[j];
+                if (strcmp(req_ext, avail_ext.extensionName) == 0) {
+                    ext_supported = true;
+                }
+            }
+
+            if (!ext_supported) {
+                all_ext_supported = false;
+            }
+        }
+
+        free(available_extensions);
+        if (!all_ext_supported) return physical_device;
+    }
+    ASSERT_MSG(false, "could not find suitable device");
+    return (VkPhysicalDevice){0};
 }
 
 /// VK_CONTEXT ///
@@ -419,67 +539,62 @@ VkContext vk_context_init(PapertrailWindow *window) {
 	};
 
 	const char *required_extensions[MAX_PROPERTIES_LEN];
-	u32 req_extension_index = 0;
+    u32 required_extensions_count = 0;
     u32 window_extension_count = 0;
-    const char **window_extensions =
-        ptrail_vk_get_required_instance_exts(&window_extension_count);
-
-    for (req_extension_index = 0; req_extension_index < MIN(window_extension_count, MAX_PROPERTIES_LEN); req_extension_index++) {
-        required_extensions[req_extension_index] = window_extensions[req_extension_index];
+    const char **window_extensions = ptrail_vk_get_required_instance_exts(&window_extension_count);
+    ASSERT(window_extension_count <= MAX_PROPERTIES_LEN);
+    for (u32 i = 0; i < window_extension_count; i++) {
+        required_extensions[i] = window_extensions[i];
     }
+    required_extensions_count += window_extension_count;
+
 
 
 	/// INSTANCE ///
 
 	const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
-
 	VkInstanceCreateInfo instance_create_info = {
 			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 			.pApplicationInfo = &application_info,
 
-			.enabledExtensionCount = req_extension_index,
+			.enabledExtensionCount = required_extensions_count,
 			.ppEnabledExtensionNames = required_extensions,
 
 			.enabledLayerCount = 1,
 			.ppEnabledLayerNames = validation_layers,
 	};
-
-
 	VkInstance instance;
 	VK_CHECK(vkCreateInstance(&instance_create_info, NULL, &instance));
 
-
 	/// Surface ///
-
 	VkSurfaceKHR surface;
 	VK_CHECK(ptrail_vk_window_surface_init(instance, window, &surface));
 
 
 	/// PHYSICAL DEVICE ///
 
-	u32 physical_device_count = 0;
-	vkEnumeratePhysicalDevices(instance, &physical_device_count, NULL);
-	ASSERT_MSG(physical_device_count > 0, "failed to find device with vulkan support");
-	ASSERT(physical_device_count <= MAX_PROPERTIES_LEN);
-	VkPhysicalDevice physical_devices[MAX_PROPERTIES_LEN];
-	vkEnumeratePhysicalDevices(instance, &physical_device_count, physical_devices);
-
-	// TODO: pick device
-	// vkEnumerateDeviceExtensionProperties require VK_KHR_SWAPCHAIN_EXTENSION_NAME
-	VkPhysicalDevice physical_device = physical_devices[0];
-
-	VkPhysicalDeviceProperties physical_device_properties;
-	vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
-	println("physical device: %s", physical_device_properties.deviceName);
+	VkPhysicalDevice physical_device = vk_pick_physical_device(
+            required_extensions,
+            required_extensions_count,
+            instance);
+    VkPhysicalDeviceProperties physical_device_properties;
+    vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
+    println("physical device: %s", physical_device_properties.deviceName);
 
 
 	/// QUEUE FAMILIES ///
 
 	u32 queue_family_count = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
+    VkQueueFamilyProperties queue_families[MAX_PROPERTIES_LEN];
+	vkGetPhysicalDeviceQueueFamilyProperties(
+            physical_device,
+            &queue_family_count,
+            NULL);
 	ASSERT(queue_family_count <= MAX_PROPERTIES_LEN);
-	VkQueueFamilyProperties queue_families[MAX_PROPERTIES_LEN];
-	vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families);
+	vkGetPhysicalDeviceQueueFamilyProperties(
+            physical_device,
+            &queue_family_count,
+            queue_families);
 
 	/* graphics queue */
 	u32 graphics_queue_index = 0;
@@ -591,14 +706,10 @@ void ptrail_renderpass_destroy(VkDevice device, PapertrailRenderpass *rp) {
 	vkDestroyCommandPool(device, rp->command_pool, NULL);
 	vkDestroyPipeline(device, rp->pipeline, NULL);
 	vkDestroyRenderPass(device, rp->renderpass, NULL);
-	vkDestroyPipelineLayout(device, rp->pipeline_layout, NULL);
-	vkDestroyShaderModule(device, rp->vertex_module, NULL);
-	vkDestroyShaderModule(device, rp->fragment_module, NULL);
-	vk_swapchain_destroy(device, &rp->swapchain);
+	swapchain_destroy(device, &rp->swapchain);
 }
 
 PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow *window) {
-	VkPipelineLayout pipeline_layout;
 	VkRenderPass renderpass;
 	VkPipeline pipeline;
 	Swapchain swapchain;
@@ -690,6 +801,7 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 			.setLayoutCount = 0,
 			.pushConstantRangeCount = 0,
 	};
+    VkPipelineLayout pipeline_layout;
 	VK_CHECK(vkCreatePipelineLayout(c->device, &pipeline_layout_create_info, NULL, &pipeline_layout));
 
 
@@ -721,7 +833,7 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 	};
 
 	/* renderpass */
-	SwapchainSupportDetails swapchain_support = vk_query_swapchain_support(c->physical_device, c->surface);
+	SwapchainSupportDetails swapchain_support = query_swapchain_support(c->physical_device, c->surface);
 
 	VkAttachmentDescription color_attachment_desc = {
 			.format = swapchain_support.surface_format.format,
@@ -784,17 +896,19 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 	VK_CHECK(vkCreateGraphicsPipelines(c->device, VK_NULL_HANDLE, 1,
 		&graphics_pipeline_create_info, NULL, &pipeline));
 
+    /* cleanup */
+    vkDestroyPipelineLayout(c->device, pipeline_layout, NULL);
+    vkDestroyShaderModule(c->device, vertex_module, NULL);
+    vkDestroyShaderModule(c->device, fragment_module, NULL);
 
 	/// SWAPCHAIN ///
 
-	u32 queue_family_indices[] = { c->graphics_queue_index, c->present_queue_index };
-	u32 *distinct_queue_family_indices = queue_family_indices;
 	u32 queue_family_index_count = 2;
 	VkSharingMode swapchain_sharing_mode = VK_SHARING_MODE_CONCURRENT;
 
+    // if graphics_queue_index == present_queue_index we only have a single queue family
 	if (c->graphics_queue_index == c->present_queue_index) {
 		queue_family_index_count = 0;
-		distinct_queue_family_indices = NULL;
 		swapchain_sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
 	}
 
@@ -803,9 +917,9 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 			.image_extent = get_vk_window_size(window),
 			.sharing_mode = swapchain_sharing_mode,
 			.queue_family_index_count = queue_family_index_count,
+            .queue_family_indices = {c->graphics_queue_index, c->present_queue_index }
 	};
-	memcpy(swapchain_create_info.queue_family_indices, queue_family_indices, sizeof(u32) * MAX_QUEUE_INDICES_COUNT);
-	VK_CHECK(vk_swapchain_init(c->device, c->physical_device, c->surface, renderpass, &swapchain_create_info, &swapchain));
+	VK_CHECK(swapchain_init(c->device, c->physical_device, c->surface, renderpass, &swapchain_create_info, &swapchain));
 
 
 	/// COMMAND BUFFER ///
@@ -843,9 +957,6 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 	}
 
 	PapertrailRenderpass ptrail_renderpass = {
-		.vertex_module = vertex_module,
-		.fragment_module = fragment_module,
-		.pipeline_layout = pipeline_layout,
 		.pipeline = pipeline,
 		.renderpass = renderpass,
 		.swapchain = swapchain,
@@ -866,132 +977,154 @@ PapertrailRenderpass ptrail_renderpass_init(const VkContext *c, PapertrailWindow
 	return ptrail_renderpass;
 }
 
-void ptrail_render_frame(PapertrailWindow *window, const VkContext *c, PapertrailRenderpass *rp) {
-	VkCommandBuffer command_buffer = rp->command_buffers[rp->current_frame_index];
-	VkSemaphore image_available_semaphore = rp->semaphore_image_available[rp->current_frame_index];
-	VkSemaphore render_finished_semaphore = rp->semaphore_render_finished[rp->current_frame_index];
-	VkFence in_flight_fence = rp->fence_in_flight[rp->current_frame_index];
-
-	vkWaitForFences(c->device, 1, &in_flight_fence, VK_TRUE, U64_MAX);
-
-	u32 swapchain_image_index;
-	VkResult result = vkAcquireNextImageKHR(c->device, rp->swapchain.vk_swapchain, U64_MAX, image_available_semaphore,
-		VK_NULL_HANDLE, &swapchain_image_index);
-
-	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-		rp->swapchain_create_info.image_extent = get_vk_window_size(window);
-		vk_swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
-			&rp->swapchain_create_info, &rp->swapchain);
-		return;
-	}
-	ASSERT_MSG(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "failed to acquire swapchain image");
-
-	vkResetFences(c->device, 1, &in_flight_fence);
-	vkResetCommandBuffer(command_buffer, 0);
+void ptrail_renderpass_begin(PapertrailRenderpass *rp, const VkContext *c, PapertrailWindow *window) {
+    VkCommandBuffer command_buffer = rp->command_buffers[rp->current_frame_index];
+    VkSemaphore image_available_semaphore = rp->semaphore_image_available[rp->current_frame_index];
+    VkSemaphore render_finished_semaphore = rp->semaphore_render_finished[rp->current_frame_index];
+    VkFence in_flight_fence = rp->fence_in_flight[rp->current_frame_index];
 
 
-	VkCommandBufferBeginInfo command_buffer_begin_info = {
-			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	};
-	VK_CHECK(vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info));
+    /// ACQUIRE IMAGE ///
+
+    vkWaitForFences(c->device, 1, &in_flight_fence, VK_TRUE, U64_MAX);
+
+    VkResult result = vkAcquireNextImageKHR(c->device,
+                                            rp->swapchain.vk_swapchain,
+                                            U64_MAX,
+                                            image_available_semaphore,
+                                            VK_NULL_HANDLE,
+                                            &rp->current_swapchain_image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        rp->swapchain_create_info.image_extent = get_vk_window_size(window);
+        swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
+                          &rp->swapchain_create_info, &rp->swapchain);
+        return;
+    }
+    ASSERT_MSG(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "failed to acquire swapchain image");
+    vkResetFences(c->device, 1, &in_flight_fence);
 
 
-	VkClearValue clear_value = {
-			.color = { 0.0f, 0.0f, 0.0f, 1.0f }
-	};
 
-	VkRenderPassBeginInfo renderpass_begin_info = {
-			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-			.renderPass = rp->renderpass,
-			.framebuffer = rp->swapchain.framebuffers[swapchain_image_index],
-			.renderArea = {
-					.offset = {0},
-					.extent = rp->swapchain.extent,
-			},
-			.clearValueCount = 1,
-			.pClearValues = &clear_value,
-	};
+    vkResetCommandBuffer(command_buffer, 0);
+    VkCommandBufferBeginInfo command_buffer_begin_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
+    VK_CHECK(vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info));
 
 
-	/// BEGIN RENDERPASS ///
+    /// BEGIN RENDERPASS ///
 
-	vkCmdBeginRenderPass(command_buffer, &renderpass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rp->pipeline);
+    VkClearValue clear_value = {
+            .color = { 0.0f, 0.0f, 0.0f, 1.0f }
+    };
+    VkRenderPassBeginInfo renderpass_begin_info = {
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            .renderPass = rp->renderpass,
+            .framebuffer = rp->swapchain.framebuffers[rp->current_swapchain_image_index],
+            .renderArea = {
+                    .offset = {0},
+                    .extent = rp->swapchain.extent,
+            },
+            .clearValueCount = 1,
+            .pClearValues = &clear_value,
+    };
+    vkCmdBeginRenderPass(command_buffer, &renderpass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	VkViewport viewport = {
-			.x = 0.0f,
-			.y = 0.0f,
-			.width = (float)rp->swapchain.extent.width,
-			.height = (float)rp->swapchain.extent.height,
-			.minDepth = 0.0f,
-			.maxDepth = 1.0f,
-	};
-	vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+    /* set viewport */
+    VkViewport viewport = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (float)rp->swapchain.extent.width,
+            .height = (float)rp->swapchain.extent.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+    };
+    VkRect2D viewport_scissor = {
+            .offset = {0, 0},
+            .extent = rp->swapchain.extent,
+    };
+    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+    vkCmdSetScissor(command_buffer, 0, 1, &viewport_scissor);
 
-	VkRect2D viewport_scissor = {
-			.offset = {0, 0},
-			.extent = rp->swapchain.extent,
-	};
-	vkCmdSetScissor(command_buffer, 0, 1, &viewport_scissor);
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rp->pipeline);
+}
 
+void ptrail_renderpass_end(PapertrailRenderpass *rp, const VkContext *c, PapertrailWindow *window) {
+    VkCommandBuffer command_buffer = rp->command_buffers[rp->current_frame_index];
+    VkSemaphore image_available_semaphore = rp->semaphore_image_available[rp->current_frame_index];
+    VkSemaphore render_finished_semaphore = rp->semaphore_render_finished[rp->current_frame_index];
+    VkFence in_flight_fence = rp->fence_in_flight[rp->current_frame_index];
+
+    vkCmdEndRenderPass(command_buffer);
+    VK_CHECK(vkEndCommandBuffer(command_buffer));
+
+    /// END RENDERPASS ///
+
+    VkSemaphore wait_semaphore = image_available_semaphore;
+    VkSemaphore signal_semaphore = render_finished_semaphore;
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &wait_semaphore,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &signal_semaphore,
+            .pWaitDstStageMask = &wait_stage,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &command_buffer,
+    };
+    VK_CHECK(vkQueueSubmit(c->graphics_queue, 1, &submit_info, in_flight_fence));
+
+
+    VkPresentInfoKHR present_info = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &signal_semaphore,
+            .swapchainCount = 1,
+            .pSwapchains = &rp->swapchain.vk_swapchain,
+            .pImageIndices = &rp->current_swapchain_image_index,
+    };
+
+    VkResult result = vkQueuePresentKHR(c->present_queue, &present_info);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        rp->swapchain_create_info.image_extent = get_vk_window_size(window);
+        VK_CHECK(swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
+                                   &rp->swapchain_create_info, &rp->swapchain));
+    }
+    else {
+        ASSERT_MSG(result == VK_SUCCESS, "failed to present swapchain image. err_code: %i", result);
+    }
+
+    rp->current_frame_index = (rp->current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void ptrail_render_frame(
+        PapertrailRenderpass *rp,
+        PapertrailRenderData *render_data,
+        const VkContext *c,
+        PapertrailWindow *window)
+{
+    ptrail_renderpass_begin(rp, c, window);
+
+    VkCommandBuffer command_buffer = rp->command_buffers[rp->current_frame_index];
     VkDeviceSize offset = {0};
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &rp->buffer, &offset);
 
-	vkCmdDraw(command_buffer, 3, 1, 0, 0);
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &render_data->vertex_buffer.buffer, &offset);
+    vkCmdBindIndexBuffer(command_buffer, render_data->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdDrawIndexed(command_buffer, 6, 1, 0, 0, 0);
 
-	vkCmdEndRenderPass(command_buffer);
-	VK_CHECK(vkEndCommandBuffer(command_buffer));
-
-	/// END RENDERPASS ///
-
-	VkSemaphore wait_semaphore = image_available_semaphore;
-	VkSemaphore signal_semaphore = render_finished_semaphore;
-	VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	VkSubmitInfo submit_info = {
-			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &wait_semaphore,
-			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &signal_semaphore,
-			.pWaitDstStageMask = &wait_stage,
-			.commandBufferCount = 1,
-			.pCommandBuffers = &command_buffer,
-	};
-	VK_CHECK(vkQueueSubmit(c->graphics_queue, 1, &submit_info, in_flight_fence));
-
-
-	VkPresentInfoKHR present_info = {
-			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &signal_semaphore,
-			.swapchainCount = 1,
-			.pSwapchains = &rp->swapchain.vk_swapchain,
-			.pImageIndices = &swapchain_image_index,
-	};
-
-	result = vkQueuePresentKHR(c->present_queue, &present_info);
-
-	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-		rp->swapchain_create_info.image_extent = get_vk_window_size(window);
-		VK_CHECK(vk_swapchain_rebuild(c->device, c->physical_device, c->surface, rp->renderpass,
-			&rp->swapchain_create_info, &rp->swapchain));
-	}
-	else {
-		ASSERT_MSG(result == VK_SUCCESS, "failed to present swapchain image. err_code: %i", result);
-	}
-
-	rp->current_frame_index = (rp->current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
+    ptrail_renderpass_end(rp, c, window);
 }
 
 void window_refresh_callback(PapertrailWindow *window) {
 	PapertrailWindowCallbackFn *ptrs = ptrail_window_get_client_state(window);
-	VkContext *c = ptrs->p_context;
-	PapertrailRenderpass *rp = ptrs->p_renderpass;
-	ptrail_render_frame(window, c, rp);
+	ptrail_render_frame(ptrs->p_renderpass, ptrs->p_render_data, ptrs->p_context, window);
 }
 
 void run() {
-    PapertrailWindowInitInfo window_create_info = {
+    PapertrailWindowCreateInfo window_create_info = {
             .title = "Papertrail",
             .width = 1000,
             .height = 800,
@@ -1003,10 +1136,12 @@ void run() {
 
     VkContext c = vk_context_init(window);
 	PapertrailRenderpass rp = ptrail_renderpass_init(&c, window);
+    PapertrailRenderData render_data;
 
 
 	PapertrailWindowCallbackFn callback_ptrs = {
 			.p_renderpass = &rp,
+            .p_render_data = &render_data,
 			.p_context = &c,
 	};
 
@@ -1014,38 +1149,51 @@ void run() {
 	ptrail_window_set_refresh_callback(window, window_refresh_callback);
 	ptrail_window_set_client_state(window, &callback_ptrs);
 
-    VkBufferCreateInfo buffer_create_info = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    /// VERTEX & INDEX BUFFER INIT ///
+
+    BufferAllocationCreateInfo vertex_buffer_create_info = {
             .size = sizeof(VERTICES),
-    };
-    VmaAllocationCreateInfo allocation_create_info = {
-            .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .buffer_usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            .memory_usage = VMA_MEMORY_USAGE_AUTO,
+            .allocation_flag = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
     };
 
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VK_CHECK(vmaCreateBuffer(
-            c.allocator,
-            &buffer_create_info,
-            &allocation_create_info,
-            &buffer,
-            &allocation,
-            NULL)
-    );
+    BufferAllocationCreateInfo index_buffer_create_info = {
+            .size = sizeof(VERTICES),
+            .buffer_usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            .memory_usage = VMA_MEMORY_USAGE_AUTO,
+            .allocation_flag = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    };
+
+    VK_CHECK(buffer_allocation_create(c.allocator, &vertex_buffer_create_info, &render_data.vertex_buffer));
+    VK_CHECK(buffer_allocation_create(c.allocator, &index_buffer_create_info, &render_data.index_buffer));
 
     void *buffer_data;
-    vmaMapMemory(c.allocator, allocation, &buffer_data);
+    vmaMapMemory(c.allocator, render_data.vertex_buffer.allocation, &buffer_data);
     memcpy(buffer_data, VERTICES, sizeof(VERTICES));
-    vmaUnmapMemory(c.allocator, allocation);
+    vmaUnmapMemory(c.allocator, render_data.vertex_buffer.allocation);
 
-    rp.buffer = buffer;
+    vmaMapMemory(c.allocator, render_data.index_buffer.allocation, &buffer_data);
+    memcpy(buffer_data, INDICES, sizeof(INDICES));
+    vmaUnmapMemory(c.allocator, render_data.index_buffer.allocation);
+
+    f64 prev_time = ptrail_get_time();
+    u64 frame_count = 0;
 
 	/// RENDER LOOP ///
 	while (ptrail_window_is_open(window)) {
 		wait_if_minimized(window);
-		ptrail_render_frame(window, &c, &rp);
+
+        f64 curr_time = ptrail_get_time();
+        frame_count += 1;
+        if (curr_time - prev_time >= 1) {
+            println("fps: %llu", frame_count);
+            frame_count = 0;
+            prev_time = curr_time;
+        }
+
+		ptrail_render_frame(&rp, &render_data, &c, window);
+
 		ptrail_window_poll_events();
 	}
 
@@ -1053,7 +1201,9 @@ void run() {
 	/// CLEANUP ///
 	vkDeviceWaitIdle(c.device);
 
-    vmaDestroyBuffer(c.allocator, buffer, allocation);
+    buffer_allocation_destroy(&render_data.vertex_buffer, c.allocator);
+    buffer_allocation_destroy(&render_data.index_buffer, c.allocator);
+
 	ptrail_renderpass_destroy(c.device, &rp);
 	vk_context_destroy(&c);
 

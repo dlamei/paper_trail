@@ -5,12 +5,12 @@
 
 // PapertrailWindow * == GLFWWindow *
 
-PapertrailWindow *ptrail_vk_window_init(PapertrailWindowInitInfo *info) {
+PapertrailWindow *ptrail_vk_window_init(PapertrailWindowCreateInfo *info) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ASSERT(glfwVulkanSupported());
     GLFWwindow *glfw_window = glfwCreateWindow(1000, 800, "Papertrail", NULL, NULL);
-    glfwSetWindowSizeLimits(glfw_window, 1, 1, GLFW_DONT_CARE, GLFW_DONT_CARE);
+    glfwSetWindowSizeLimits(glfw_window, (i32)info->min_width, (i32)info->min_height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     return glfw_window;
 }
 
@@ -61,4 +61,8 @@ const char **ptrail_vk_get_required_instance_exts(u32 *count) {
 
 PTRAIL_RESULT ptrail_vk_window_surface_init(VkInstance instance, PapertrailWindow *window, VkSurfaceKHR *surface) {
     return glfwCreateWindowSurface(instance, window, NULL, surface);
+}
+
+f64 ptrail_get_time() {
+    return glfwGetTime();
 }
